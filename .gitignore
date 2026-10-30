@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.env
+data/raw/
+*.log
+data/osm/
+qa-travel-spotcheck.csv

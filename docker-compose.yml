@@ -1,0 +1,61 @@
+# Local stack: PostgreSQL 16 + PostGIS 3.4 and the API.
+#   docker compose up -d
+#   docker compose exec api npm run db:seed:prod
+#   docker compose exec api npm run simulate:prod
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: aga
+      POSTGRES_PASSWORD: aga
+      POSTGRES_DB: aga
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aga -d aga"]
+      interval: 5s
+      retries: 10
+
+  # OpenStreetMap routing for real road + ferry travel times. Opt-in:
+  #   sh scripts/osrm-prepare.sh && docker compose --profile routing up -d osrm
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    profiles: ["routing"]
+    command: osrm-routed --algorithm mld --max-table-size 1000 /data/philippines.osrm
+    volumes: ["./data/osm:/data:ro"]
+    ports: ["5001:5000"]
+
+  # Same map, foot profile: walking directions to centers within 500 m (footpaths, steps, no motorways).
+  osrm-foot:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    profiles: ["routing"]
+    command: osrm-routed --algorithm mld --max-table-size 1000 /data/philippines-foot.osrm
+    volumes: ["./data/osm:/data:ro"]
+    ports: ["5002:5000"]
+
+  api:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://aga:aga@db:5432/aga?schema=public
+      NODE_ENV: production
+      OSRM_URL: http://osrm:5000 # used when TRAVEL_MODEL=osrm
+      OSRM_FOOT_URL: http://osrm-foot:5000
+      # The website's nginx is the only way in (see the `web` service), so trust its X-Forwarded-For for rate limits.
+      TRUST_PROXY: "1"
+    # localhost only: with TRUST_PROXY=1 the API must be reached through the `web` proxy, not directly
+    ports: ["127.0.0.1:3000:3000"]
+
+  # The website (nginx + the built frontend), served at http://localhost:8080 and forwarding /api to `api`.
+  # Needs the sibling folder ../project-aga-frontend:  docker compose --profile web up -d --build
+  web:
+    build: ../project-aga-frontend
+    profiles: ["web"]
+    depends_on: [api]
+    ports: ["8080:80"]
+
+volumes:
+  pgdata:
