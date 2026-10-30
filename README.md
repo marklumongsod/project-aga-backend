@@ -1,6 +1,6 @@
 # Project AGA - Backend API
 
-AI-Based Assessment Center Gap Analysis (TESDA eTESDA Division, Team C).
+AI-Based Assessment Center Gap Analysis (TESDA DISDAU Division).
 NestJS 11 + PostgreSQL 16 / PostGIS 3 + TypeORM.
 
 It serves:
