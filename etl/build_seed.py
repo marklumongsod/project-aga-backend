@@ -1,17 +1,15 @@
 """Build the backend seed files from the raw Team C dataset.
 
-Reads   data/raw/GROUP_C_DATASET.xlsx, data/raw/T2MIS_Enrolls.csv,
-        data/raw/assessment_center_points.geojson, data/geo/** (PSGC 2023, faeldon/philippines-json-maps)
+Reads   data/raw/GROUP_C_DATASET.xlsx, data/raw/assessment_center_points.geojson,
+        data/geo/** (PSGC 2023, faeldon/philippines-json-maps)
 Writes  database/seed-data/*.json  (loaded by `npm run db:seed`)
 
-Privacy: no learner-level personal data is written. The T2MIS Student Profile and
-TSP sheets are never read; enrollments and assessments keep only schedule, status,
-result and dates (no ULI, names, contact details or civil status).
+Privacy: no learner-level personal data is read or written. The T2MIS Student Profile
+and TSP sheets are never read.
 
 Run:  python -I etl/build_seed.py      (needs: shapely openpyxl)
 """
 import collections
-import csv
 import datetime as dt
 import glob
 import json
@@ -182,7 +180,7 @@ dump('cities.json', [dict(key=c['key'], psgc=c['psgc'], name=c['name'], province
                           derivedBoundary=c['derived'], islandId=c['island'], lat=r6(c['pt'].y), lon=r6(c['pt'].x),
                           geometry=geom_json(c['geom'])) for c in cities])
 
-# ---------------------------------------------------------------- T2MIS (xlsx + csv)
+# ---------------------------------------------------------------- T2MIS (xlsx)
 print('t2mis', file=sys.stderr)
 wb = openpyxl.load_workbook(os.path.join(RAW, 'GROUP_C_DATASET.xlsx'), read_only=True, data_only=True)
 
@@ -205,7 +203,6 @@ for r in sheet('T2MIS Qualifications'):
     quals.append(dict(id=q, sectorId=num(r['SectorId']), title=str(r['QualificationTitle']).strip(), code=clean(r['QualificationCode']),
                       levelId=num(r['LevelId']), enabled=str(r['Enable']) in ('1', '1.0', 'True')))
 dump('qualifications.json', quals)
-qual_ids = {q['id'] for q in quals}
 
 xl_centers = {num(r['CenterId']): r for r in sheet('T2MIS Assessment Centers') if num(r['CenterId']) is not None}
 gj = json.load(open(os.path.join(RAW, 'assessment_center_points.geojson')))['features']
@@ -232,47 +229,7 @@ for f in gj:
         createdAt=epoch(xl.get('DateCreated')),
     ))
 dump('centers.json', centers)
-center_ids = {c['id'] for c in centers}
 print(f"  centers in analysis: {sum(c['includeInAnalysis'] for c in centers)} of {len(centers)}", file=sys.stderr)
-
-progs = []
-for r in sheet('T2MIS Center Programs'):
-    i, c, q = num(r['CenterProgramId']), num(r['CenterId']), num(r['QualId'])
-    if None in (i, c, q) or c not in center_ids or q not in qual_ids:
-        continue
-    progs.append(dict(id=i, centerId=c, qualificationId=q, accreditationNo=clean(r['Accreditation_no']),
-                      accreditedAt=epoch(r['Date_Accredited']), expiresAt=epoch(r['Expiration_Date'])))
-dump('center_programs.json', progs)
-prog_ids = {p['id'] for p in progs}
-
-scheds = []
-for r in sheet('T2MIS Center Schedules'):
-    i, cp = num(r['CenterSchedId']), num(r['CenterProgramId'])
-    if None in (i, cp) or cp not in prog_ids:
-        continue
-    scheds.append(dict(id=i, centerProgramId=cp, startedAt=epoch(r['DateStarted'])))
-dump('center_schedules.json', scheds)
-sched_ids = {s['id'] for s in scheds}
-
-assess = []
-for r in sheet('T2MIS Assessments'):
-    i, s = num(r['AssessmentId']), num(r['CenterSchedId'])
-    if None in (i, s) or s not in sched_ids:
-        continue
-    assess.append(dict(id=i, centerScheduleId=s, resultId=num(r['AsseResultId']), appliedAt=epoch(r['DateofApplication']),
-                       createdAt=epoch(r['DateCreated'])))
-dump('assessments.json', assess)
-
-enr = []
-with open(os.path.join(RAW, 'T2MIS_Enrolls.csv'), encoding='utf-8', errors='replace') as fh:
-    for r in csv.DictReader(fh):
-        i = num(r['EnrollId'])
-        if i is None:
-            continue
-        enr.append(dict(id=i, trainingScheduleId=num(r['SchSchedId']), trainStatusId=num(r['TrainStatusId']),
-                        trainResultId=num(clean(r['TrainResultId'])), scholarshipTypeId=num(clean(r['TypeScholarId'])),
-                        createdAt=epoch(r['DateCreated'])))
-dump('enrollments.json', enr)
 
 # ---------------------------------------------------------------- BSRS
 print('bsrs', file=sys.stderr)
@@ -350,14 +307,4 @@ dump('bsrs_stats.json', stats)
 unm = [s['sourceName'] for s in stats if s['level'] == 'PROVINCE' and not s['provincePsgc'] and not s['cityKeys']]
 unc = [s['sourceName'] for s in stats if s['level'] == 'CITY' and not s['cityKey']]
 print(f'  unmatched provinces {unm}; unmatched cities {len(unc)}: {unc[:8]}', file=sys.stderr)
-
-qrows = []
-qtitle = {norm(q['title']): q['id'] for q in quals}
-for r in sheet('BSRS Scholarship Data Per Quali'):
-    if r.get('enrolled_count') is None:
-        continue
-    t = re.sub(r'\s+NC\s+[IV]+$', '', str(r['qualification']).strip(), flags=re.I)
-    qrows.append(dict(regionName=r['region'], provinceName=r['province'], cityName=r['city_mun'], qualification=r['qualification'],
-                      qualificationId=qtitle.get(norm(t)), enrolled=int(r['enrolled_count']), completed=int(r['completed_count'])))
-dump('bsrs_qualification_stats.json', qrows)
 print('done', file=sys.stderr)
