@@ -16,8 +16,10 @@ interface AreaRow {
   name: string;
   candidates: number;
   flagged: number;
+  served: number;
   centers: number;
   flagged_share: number;
+  service_rate: number | null;
   desert_level: number;
   desert_cities: number;
   desert_candidates: number;
@@ -74,7 +76,9 @@ export class DashboardService {
       parentCode: r.parent_key ?? null,
       candidates: r.candidates,
       flagged: r.flagged,
+      served: r.served,
       flaggedShare: r.flagged_share,
+      serviceRate: r.service_rate,
       centers: r.centers,
       densityBand: 0, // set against the siblings in childRows
       desertLevel: r.desert_level ?? 0,
@@ -139,8 +143,9 @@ export class DashboardService {
       filter = 'AND a.parent_key = $3';
     }
     const rows: AreaRow[] = await this.db.query(
-      `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.centers, a.flagged_share,
-              a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates, a.nearest_minutes
+      `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.served, a.centers,
+              a.flagged_share, a.service_rate, a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates,
+              a.nearest_minutes
          FROM area_utilization a ${JOINS}
         WHERE a.run_id = $1 AND a.level = $2 ${filter}`,
       params,
@@ -156,8 +161,9 @@ export class DashboardService {
     const area = await this.scope.resolve(user, q.level, q.code);
     const run = await this.sim.runFor(q.limitMinutes);
     const [self]: AreaRow[] = await this.db.query(
-      `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.centers, a.flagged_share,
-              a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates, a.nearest_minutes
+      `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.served, a.centers,
+              a.flagged_share, a.service_rate, a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates,
+              a.nearest_minutes
          FROM area_utilization a ${JOINS} WHERE a.run_id = $1 AND a.level = $2 AND a.area_key = $3`,
       [run.id, area.level, area.code],
     );
@@ -170,7 +176,9 @@ export class DashboardService {
           parentCode: null,
           candidates: 0,
           flagged: 0,
+          served: 0,
           flaggedShare: 0,
+          serviceRate: null,
           centers: 0,
           densityBand: 0,
           desertLevel: 0,
@@ -239,7 +247,9 @@ export class DashboardService {
             parentCode: null,
             candidates: 0,
             flagged: 0,
+            served: 0,
             flaggedShare: 0,
+            serviceRate: null,
             centers: 0,
             densityBand: -1,
             desertLevel: 0,
@@ -264,7 +274,7 @@ export class DashboardService {
           ? 'AND c.region_psgc = $2'
           : 'AND c.province_psgc = $2';
     const rows = await this.db.query(
-      `SELECT c.id, c.name, c.lat, c.lon, ci.name AS city, u.demand
+      `SELECT c.id, c.name, c.lat, c.lon, ci.name AS city, u.demand, u.reach, u.service_rate
          FROM center_utilization u
          JOIN assessment_centers c ON c.id = u.center_id
          LEFT JOIN cities ci ON ci.id = c.city_id
@@ -280,6 +290,10 @@ export class DashboardService {
       lon: r.lon,
       /** TESDA only: candidates who would go to this center first */
       predictedCandidates: r.demand,
+      /** candidates in every city this center can reach (overlaps across centers) */
+      reach: r.reach,
+      /** reach-based access: predictedCandidates / reach; null when reach is 0 or unknown */
+      serviceRate: r.service_rate,
     }));
   }
 }

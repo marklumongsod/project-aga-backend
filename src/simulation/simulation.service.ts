@@ -277,23 +277,26 @@ export class SimulationService {
         },
       };
       await this.db.transaction(async (m) => {
-        const areaRows = areas.map((a) =>
-          m.create(AreaUtilization, {
+        const areaRows = areas.map((a) => {
+          const served = a.candidates - a.flagged;
+          return m.create(AreaUtilization, {
             runId: run.id,
             level: a.level,
             areaKey: a.key,
             parentKey: a.parent,
             candidates: a.candidates,
             flagged: a.flagged,
+            served,
             centers: a.centers,
             flaggedShare: a.candidates ? a.flagged / a.candidates : 0,
+            serviceRate: a.candidates ? served / a.candidates : null,
             desertLevel: a.desertLevel,
             desertCities: a.desertCities,
             desertCandidates: a.desertCandidates,
             estimatedCandidates: a.estimatedCandidates,
             nearestMinutes: a.nearestMinutes,
-          }),
-        );
+          });
+        });
         for (let i = 0; i < areaRows.length; i += 1000)
           await m.insert(AreaUtilization, areaRows.slice(i, i + 1000));
         const centerRows = [...r.centers.values()].map((c) =>
@@ -301,6 +304,8 @@ export class SimulationService {
             runId: run.id,
             centerId: c.id,
             demand: c.demand,
+            reach: c.reach,
+            serviceRate: c.reach ? c.demand / c.reach : null,
           }),
         );
         for (let i = 0; i < centerRows.length; i += 1000)

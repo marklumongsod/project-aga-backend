@@ -52,6 +52,11 @@ export interface CenterResult {
   id: number;
   /** candidates whose first (nearest) reachable center is this one - "predicted candidates" */
   demand: number;
+  /**
+   * candidates in every city this center can reach within the travel limit (a city counts for every center it can
+   * reach, so reach values overlap; they are not a partition of the candidates)
+   */
+  reach: number;
 }
 
 export interface EngineResult {
@@ -109,6 +114,7 @@ export class UtilizationEngine {
 
   run(groups: SimGroup[]): EngineResult {
     const demand = new Map<number, number>(this.centers.map((c) => [c.id, 0]));
+    const reachCount = new Map<number, number>(this.centers.map((c) => [c.id, 0]));
     const results = new Map<string, GroupResult>();
     let candidates = 0;
     let flagged = 0;
@@ -118,11 +124,14 @@ export class UtilizationEngine {
       const none = reach.length === 0;
       results.set(g.key, { key: g.key, count: g.count, flagged: none ? g.count : 0, nearestMinutes: reach[0]?.minutes ?? null });
       if (reach[0]) demand.set(reach[0].center.id, (demand.get(reach[0].center.id) ?? 0) + g.count);
+      for (const hit of reach) reachCount.set(hit.center.id, (reachCount.get(hit.center.id) ?? 0) + g.count);
       candidates += g.count;
       if (none) flagged += g.count;
     }
 
-    const centers = new Map<number, CenterResult>(this.centers.map((c) => [c.id, { id: c.id, demand: demand.get(c.id)! }]));
+    const centers = new Map<number, CenterResult>(
+      this.centers.map((c) => [c.id, { id: c.id, demand: demand.get(c.id)!, reach: reachCount.get(c.id)! }]),
+    );
     return { groups: results, centers, totals: { candidates, flagged } };
   }
 }
