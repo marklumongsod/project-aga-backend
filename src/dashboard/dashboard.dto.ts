@@ -41,8 +41,16 @@ export class AreaStatsDto {
   parentCode: string | null;
   candidates: number;
   flagged: number;
+  /** candidates with at least one center in reach (candidates - flagged) */
+  served: number;
   /** flagged / candidates */
   flaggedShare: number;
+  /**
+   * Reach-based access rate: served / candidates, 0..1; null when the area has no candidates.
+   * This is not capacity utilization: slots are not counted.
+   */
+  @ApiProperty({ nullable: true, example: 0.968 })
+  serviceRate: number | null;
   /** assessment centers in the area */
   centers: number;
   /** density class of this area among its siblings (see densityLegend): 0..n, the highest is the hotspot; -1 = no candidates */

@@ -92,12 +92,20 @@ export class AreaUtilization {
   @Column({ type: 'int' })
   flagged: number;
 
+  /** candidates with at least one center in reach (candidates - flagged) */
+  @Column({ type: 'int', default: 0 })
+  served: number;
+
   @Column({ type: 'int' })
   centers: number;
 
   /** flagged / candidates */
   @Column({ name: 'flagged_share', type: 'double precision' })
   flaggedShare: number;
+
+  /** served / candidates (reach-based access, not capacity utilization); null when there are no candidates */
+  @Column({ name: 'service_rate', type: 'double precision', nullable: true })
+  serviceRate: number | null;
 
   /** cities: assessment desert level 1-4 by candidates, 0 = not a desert; larger areas: the highest level inside */
   @Column({ name: 'desert_level', type: 'smallint', default: 0 })
@@ -139,4 +147,12 @@ export class CenterUtilization {
   /** predicted candidates: those whose nearest reachable center is this one */
   @Column({ type: 'int' })
   demand: number;
+
+  /** candidates in every city this center can reach (overlaps across centers); null for runs before the rate existed */
+  @Column({ type: 'int', nullable: true })
+  reach: number | null;
+
+  /** demand / reach (reach-based access, not capacity utilization); null when reach is 0 or unknown */
+  @Column({ name: 'service_rate', type: 'double precision', nullable: true })
+  serviceRate: number | null;
 }

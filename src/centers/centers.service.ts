@@ -50,8 +50,11 @@ export class CentersService {
     const util = async () => {
       try {
         const run = await this.sim.runFor(limitMinutes);
-        const [u] = await this.db.query(`SELECT demand FROM center_utilization WHERE run_id = $1 AND center_id = $2`, [run.id, id]);
-        return u ? { predictedCandidates: u.demand } : null;
+        const [u] = await this.db.query(
+          `SELECT demand, reach, service_rate FROM center_utilization WHERE run_id = $1 AND center_id = $2`,
+          [run.id, id],
+        );
+        return u ? { predictedCandidates: u.demand, reach: u.reach, serviceRate: u.service_rate } : null;
       } catch {
         return null;
       }

@@ -399,10 +399,19 @@ describe('Project AGA API (e2e)', () => {
       expect(negros.parentCode).toBe(R6);
     });
 
-    it('has no utilization or service rate, and no rate legend', async () => {
+    it('reports a reach-based service rate, never a capacity rate', async () => {
       const ov = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
       for (const o of [ov.body.area, ...ov.body.rows]) {
-        for (const k of ['rate', 'serviceRate', 'band', 'utilization']) expect(o).not.toHaveProperty(k);
+        expect(o.served).toBe(o.candidates - o.flagged);
+        if (o.candidates > 0) {
+          expect(o.serviceRate).toBeGreaterThanOrEqual(0);
+          expect(o.serviceRate).toBeLessThanOrEqual(1);
+          // served / candidates is the same figure as 1 - flaggedShare, by definition
+          expect(o.serviceRate).toBeCloseTo(1 - o.flaggedShare, 10);
+        } else {
+          expect(o.serviceRate).toBeNull();
+        }
+        for (const k of ['rate', 'band', 'utilization', 'slots', 'slotsPerQuarter']) expect(o).not.toHaveProperty(k);
       }
       expect(ov.body).not.toHaveProperty('legend');
     });
@@ -534,7 +543,7 @@ describe('Project AGA API (e2e)', () => {
         api().get('/api/v1/dashboard/overview?level=REGION&code=0700000000').set(as('ro')).expect(403));
     });
 
-    it('centers list carries predicted candidates (TESDA only)', () =>
+    it('centers list carries predicted candidates and their reach-based service rate (TESDA only)', () =>
       api()
         .get('/api/v1/dashboard/centers')
         .set(as('po'))
@@ -542,6 +551,12 @@ describe('Project AGA API (e2e)', () => {
         .expect((r) => {
           expect(r.body.length).toBeGreaterThan(0);
           expect(r.body[0]).toHaveProperty('predictedCandidates');
+          expect(r.body[0]).toHaveProperty('reach');
+          expect(r.body[0]).toHaveProperty('serviceRate');
+          expect(r.body[0].reach).toBeGreaterThanOrEqual(r.body[0].predictedCandidates);
+          expect(r.body[0].serviceRate).toBeGreaterThanOrEqual(0);
+          expect(r.body[0].serviceRate).toBeLessThanOrEqual(1);
+          for (const k of ['slots', 'taken', 'utilization']) expect(r.body[0]).not.toHaveProperty(k);
         }));
   });
 
@@ -552,14 +567,19 @@ describe('Project AGA API (e2e)', () => {
       centerId = r.body[0].id;
     });
 
-    it('center card shows predicted candidates', () =>
+    it('center card shows predicted candidates and the reach-based service rate', () =>
       api()
         .get(`/api/v1/centers/${centerId}`)
         .set(as('po'))
         .expect(200)
         .expect((r) => {
           expect(r.body.current).toHaveProperty('predictedCandidates');
-          for (const k of ['utilization', 'taken', 'slotsPerQuarter']) expect(r.body.current).not.toHaveProperty(k);
+          expect(r.body.current).toHaveProperty('reach');
+          expect(r.body.current).toHaveProperty('serviceRate');
+          expect(r.body.current.reach).toBeGreaterThanOrEqual(r.body.current.predictedCandidates);
+          expect(r.body.current.serviceRate).toBeGreaterThanOrEqual(0);
+          expect(r.body.current.serviceRate).toBeLessThanOrEqual(1);
+          for (const k of ['utilization', 'taken', 'slotsPerQuarter', 'slots']) expect(r.body.current).not.toHaveProperty(k);
           expect(r.body).not.toHaveProperty('nextQuarter');
         }));
 

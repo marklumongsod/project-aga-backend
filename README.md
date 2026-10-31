@@ -93,6 +93,7 @@ flagged share = flagged / candidates
 
 - Centers are listed **nearest-first** by travel time.
 - **Predicted candidates** for a center = candidates whose nearest reachable center it is.
+- **Service rate** (reach-based access, not capacity): area `served / candidates`, where `served = candidates - flagged`; center `predictedCandidates / reach`, where `reach` is the candidates in every city the center can reach. It measures how much of the candidate population has a center in range, not how full a center's slots are.
 - A flagged candidate is therefore one with no center in reach, so flagged candidates equal the candidates in desert cities.
 
 ### Assessment deserts, hotspots and density (team doc)
