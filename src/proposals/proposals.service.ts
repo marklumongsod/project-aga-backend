@@ -5,14 +5,14 @@ import { AuthUser } from '../common/auth.decorators';
 import { Proposal, Role } from '../database/entities';
 import { SimulationService } from '../simulation/simulation.service';
 import { WhatIfDto, WhatIfResultDto } from '../simulation/simulation.dto';
-import { ProposalDto, ProposalSummaryDto } from './proposals.dto';
+import { ProposalDto, ProposalSummaryDto, RenameProposalDto } from './proposals.dto';
 
 interface Row extends Proposal {
   authorName: string;
   authorRole: string;
 }
 
-const SELECT = `SELECT p.id, p."name", p.lat, p.lon, p.city_key AS "cityKey", p.city_name AS "cityName",
+const SELECT = `SELECT p.id, p.report_no AS "reportNo", p."name", p.lat, p.lon, p.city_key AS "cityKey", p.city_name AS "cityName",
        p.region_psgc AS "regionPsgc", p.province_psgc AS "provincePsgc", p.area_level AS "areaLevel",
        p.area_code AS "areaCode", p.area_name AS "areaName", p.limit_minutes AS "limitMinutes", p.status,
        p.snapshot, p.created_at AS "createdAt", p.author_id AS "authorId", u.name AS "authorName", u.role AS "authorRole"
@@ -36,6 +36,7 @@ export class ProposalsService {
     const result = r.snapshot as WhatIfResultDto;
     return {
       id: r.id,
+      reportNo: Number(r.reportNo),
       name: r.name,
       cityKey: r.cityKey,
       cityName: r.cityName,
@@ -101,6 +102,15 @@ export class ProposalsService {
     // not found and not allowed look the same, so ids can't be probed
     if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
     return { ...this.summary(user, r), result: r.snapshot as WhatIfResultDto };
+  }
+
+  /** Rename (the report's name). Same rule as delete: the author, or Central Office. */
+  async rename(user: AuthUser, id: string, dto: RenameProposalDto): Promise<ProposalSummaryDto> {
+    const [r]: Row[] = await this.db.query(`${SELECT} WHERE p.id = $1`, [id]);
+    if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
+    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Central Office can rename a proposal');
+    await this.db.query(`UPDATE proposals SET name = $2 WHERE id = $1`, [id, dto.name]);
+    return this.summary(user, { ...r, name: dto.name });
   }
 
   /** The author may delete their own; Central Office may delete any. */

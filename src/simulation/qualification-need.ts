@@ -4,14 +4,15 @@
  */
 export interface DemandRow {
   provincePsgc: string;
-  qualificationId: number;
+  /** the T2MIS QualId, when the TESDA name matches one */
+  qualificationId: number | null;
   qualification: string;
   graduates: number;
 }
 
 export interface QualificationNeed {
   qualification: string;
-  qualificationId: number;
+  qualificationId: number | null;
   /** candidates among those the site would serve who are likely to want it (an estimate) */
   estimatedCandidates: number;
   /** estimatedCandidates / the candidates served in provinces that have graduate data, 0 to 1 */
@@ -31,14 +32,15 @@ export const qualificationKey = (s: string) =>
 /**
  * For each province the site would serve, the candidates it serves there are split over that province's qualifications
  * by the share of its graduates in each. Summed over provinces and ranked, the top ones are the qualifications the site
- * should offer first. A province with no graduate data adds nothing (and is left out of the shares).
+ * should offer first. A province with no graduate data adds nothing (and is left out of the shares). Rows are matched
+ * by name (`qualificationKey`), since not every TESDA name has a T2MIS id.
  *
  * `supply(provinces, qualificationId, qualification)` says how many existing centers in those provinces offer it.
  */
 export function estimateQualificationNeed(
   served: Array<{ provincePsgc: string; count: number }>,
   demand: DemandRow[],
-  supply: (provinces: Set<string>, qualificationId: number, qualification: string) => number,
+  supply: (provinces: Set<string>, qualificationId: number | null, qualification: string) => number,
   top = 3,
 ): QualificationNeed[] {
   const servedBy = new Map<string, number>();
@@ -47,7 +49,7 @@ export function estimateQualificationNeed(
   const totalOf = new Map<string, number>();
   for (const d of demand) totalOf.set(d.provincePsgc, (totalOf.get(d.provincePsgc) ?? 0) + d.graduates);
 
-  const est = new Map<number, { qualification: string; est: number }>();
+  const est = new Map<string, { qualification: string; qualificationId: number | null; est: number }>();
   let withData = 0;
   for (const [prov, count] of servedBy) {
     const total = totalOf.get(prov);
@@ -55,21 +57,23 @@ export function estimateQualificationNeed(
     withData += count;
     for (const d of demand) {
       if (d.provincePsgc !== prov || d.graduates <= 0) continue;
-      const cur = est.get(d.qualificationId) ?? { qualification: d.qualification, est: 0 };
+      const key = qualificationKey(d.qualification);
+      const cur = est.get(key) ?? { qualification: d.qualification, qualificationId: d.qualificationId, est: 0 };
+      cur.qualificationId ??= d.qualificationId;
       cur.est += (count * d.graduates) / total;
-      est.set(d.qualificationId, cur);
+      est.set(key, cur);
     }
   }
   if (!withData) return [];
 
   const provinces = new Set(servedBy.keys());
-  return [...est.entries()]
-    .map(([qualificationId, v]) => ({
-      qualificationId,
+  return [...est.values()]
+    .map((v) => ({
+      qualificationId: v.qualificationId,
       qualification: v.qualification,
       estimatedCandidates: Math.round(v.est),
       share: v.est / withData,
-      centersOffering: supply(provinces, qualificationId, v.qualification),
+      centersOffering: supply(provinces, v.qualificationId, v.qualification),
     }))
     .sort((a, b) => b.estimatedCandidates - a.estimatedCandidates || a.centersOffering - b.centersOffering || a.qualification.localeCompare(b.qualification))
     .slice(0, top);

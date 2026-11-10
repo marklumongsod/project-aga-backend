@@ -120,8 +120,8 @@ export class RecommendQueryDto extends DashboardQueryDto {
 export class QualificationNeedDto {
   /** e.g. "Driving II" */
   qualification: string;
-  /** the T2MIS qualification id */
-  qualificationId: number;
+  /** the T2MIS qualification id; null when the TESDA name has none */
+  qualificationId: number | null;
   /** candidates among those the site would serve who are likely to want it (an estimate) */
   estimatedCandidates: number;
   /** estimatedCandidates / the candidates served, 0 to 1 */
@@ -190,6 +190,17 @@ export class SnapQueryDto {
   @IsString()
   @MaxLength(40)
   code?: string;
+}
+
+/** A proposed center's reach: the same pin and area as the what-if, and its travel limit. */
+export class PinReachQueryDto extends SnapQueryDto {
+  @ApiPropertyOptional({ minimum: MIN_LIMIT_MINUTES, maximum: MAX_LIMIT_MINUTES })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(MIN_LIMIT_MINUTES)
+  @Max(MAX_LIMIT_MINUTES)
+  limitMinutes?: number;
 }
 
 export class SnapResultDto {

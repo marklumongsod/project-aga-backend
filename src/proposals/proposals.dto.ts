@@ -1,9 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
+import { IsString, Length } from 'class-validator';
 import { WhatIfResultDto } from '../simulation/simulation.dto';
 
 /** A saved what-if, as listed. The full result is on `GET /proposals/:id`. */
 export class ProposalSummaryDto {
   id: string;
+  /** short report number, shown as RPT-0001 */
+  reportNo: number;
   name: string;
   /** the city or municipality the pin landed in */
   cityKey: string | null;
@@ -34,4 +38,12 @@ export class ProposalDto extends ProposalSummaryDto {
   /** the what-if result worked out by the server when the proposal was saved */
   @ApiProperty({ type: () => WhatIfResultDto })
   result: WhatIfResultDto;
+}
+
+/** Rename a saved proposal (the report's name). */
+export class RenameProposalDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @Length(1, 120)
+  name: string;
 }

@@ -1,9 +1,14 @@
 /**
- * Client for TESDA's Assessor Coverage API (https://sap-sis.tesda.gov.ph/swagger/index.html).
- *   - /api/v1/public/*   centers and their qualifications, no key
- *   - /api/v1/coverage/* graduates per school and the time of TESDA's nightly recalculation, X-Api-Key header
- * Only counts and center details are read. The API has no learner details and none are requested.
+ * Client for TESDA's Assessor Coverage API (https://sap-sis.tesda.gov.ph/swagger/index.html). Every call sends the
+ * X-Api-Key header.
+ *   - /api/v1/centers, /api/v1/qualifications   centers and what they assess (any key)
+ *   - /api/v1/students/all                       upcoming graduates (next 6 months), one row each (key with the
+ *                                                students permission). The rows carry no names or ids; only the point,
+ *                                                its precision, the qualification and the finish month are read, and
+ *                                                they are summed before anything is stored (see `upcomingGraduates`).
+ *   - /api/v1/coverage/run                       the time of TESDA's nightly recalculation (not in the spec, still served)
  */
+import { manilaMonthStart } from './manila-months';
 
 export interface TesdaCenter {
   id: number;
@@ -26,20 +31,24 @@ export interface TesdaCenterQualification {
   accreditedUntil: number | null;
 }
 
-export interface TesdaSchoolGraduates {
-  schoolId: number;
-  schoolName: string | null;
-  province: string | null;
+/** Upcoming graduates at one point, of one qualification, finishing in one month. A count, never a person. */
+export interface TesdaGraduateGroup {
   lat: number;
   lon: number;
+  /** 'city' = the point is the graduate's town; 'province' = only the province is known (the point is its centre) */
+  precision: 'city' | 'province';
+  qualification: string;
+  /** epoch seconds of 00:00 Asia/Manila on the 1st of the finish month */
+  month: number;
   graduates: number;
 }
 
-export interface TesdaMonthGraduates {
-  /** graduates of schools that have no map position (not in `schools`) */
-  notOnMap: number;
+export interface TesdaUpcomingGraduates {
+  /** the API's own total */
   total: number;
-  schools: TesdaSchoolGraduates[];
+  groups: TesdaGraduateGroup[];
+  /** rows with no usable point, qualification or finish month */
+  skipped: number;
 }
 
 export class TesdaApiError extends Error {
@@ -54,8 +63,12 @@ type FetchFn = (url: string, init?: { signal?: AbortSignal; headers?: Record<str
   json(): Promise<unknown>;
 }>;
 
-/** The API returns at most 200 rows per page whatever `limit` says. */
+/** The API returns at most 200 centers per page whatever `limit` says. */
 const PAGE = 200;
+/** ... and at most 2,000 students. */
+const STUDENT_PAGE = 2000;
+/** A deep students page takes about 30 s (offset paging on TESDA's side). */
+const STUDENT_TIMEOUT_MS = 120_000;
 const RETRY_STATUS = new Set([429, 502, 503, 504]);
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -118,19 +131,19 @@ export function parseQualifications(raw: unknown): TesdaCenterQualification[] {
   return [...out.values()];
 }
 
-export function parseGraduates(raw: unknown): TesdaMonthGraduates {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  const schools: TesdaSchoolGraduates[] = [];
-  for (const s of Array.isArray(r.schools) ? (r.schools as Array<Record<string, unknown>>) : []) {
-    const schoolId = num(s?.schoolId);
-    const lat = num(s?.latitude);
-    const lon = num(s?.longitude);
-    const graduates = num(s?.graduates);
-    if (schoolId === null || lat === null || lon === null || graduates === null || graduates <= 0) continue;
-    if (!inPhilippines(lat, lon)) continue;
-    schools.push({ schoolId, schoolName: text(s.schoolName), province: text(s.province), lat, lon, graduates: Math.round(graduates) });
-  }
-  return { notOnMap: num(r.notOnMap) ?? 0, total: num(r.total) ?? 0, schools };
+/**
+ * The parts of one student row this app uses: point, precision, qualification, finish month. Everything else in the
+ * row (barangay, school, nearest center) is dropped here. Null when the row can't be placed or dated.
+ */
+export function parseStudent(raw: unknown): Omit<TesdaGraduateGroup, 'graduates'> | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== 'object') return null;
+  const lat = num(r.latitude);
+  const lon = num(r.longitude);
+  const qualification = text(r.qualification);
+  const month = typeof r.finishMonth === 'string' ? manilaMonthStart(r.finishMonth) : null;
+  if (lat === null || lon === null || !qualification || month === null || !inPhilippines(lat, lon)) return null;
+  return { lat, lon, precision: r.precision === 'city' ? 'city' : 'province', qualification, month };
 }
 
 export interface TesdaClientOptions {
@@ -177,12 +190,12 @@ export class TesdaClient {
   }
 
   /** GET JSON, one request at a time and `minIntervalMs` apart, so a sync never bursts at TESDA's server. */
-  private get(path: string, withKey = false): Promise<unknown> {
+  private get(path: string, timeoutMs = this.timeoutMs): Promise<unknown> {
     const job = this.queue.then(async () => {
       const gap = this.lastAt + this.minIntervalMs - Date.now();
       if (gap > 0) await this.sleep(gap);
       try {
-        return await this.send(path, withKey);
+        return await this.send(path, timeoutMs);
       } finally {
         this.lastAt = Date.now();
       }
@@ -192,13 +205,12 @@ export class TesdaClient {
   }
 
   /** GET JSON with a timeout; 429/5xx gateway errors and network errors are retried with backoff (long for 429). */
-  private async send(path: string, withKey: boolean): Promise<unknown> {
-    if (withKey && !this.apiKey) throw new TesdaApiError(`${path} needs TESDA_API_KEY`);
-    const headers: Record<string, string> = { accept: 'application/json' };
-    if (withKey && this.apiKey) headers['X-Api-Key'] = this.apiKey;
+  private async send(path: string, timeoutMs: number): Promise<unknown> {
+    if (!this.apiKey) throw new TesdaApiError(`TESDA API ${path.split('?')[0]} needs TESDA_API_KEY`);
+    const headers: Record<string, string> = { accept: 'application/json', 'X-Api-Key': this.apiKey };
     for (let attempt = 0; ; attempt++) {
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), this.timeoutMs);
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
       let status = 0;
       try {
         const res = await this.fetchFn(`${this.base}${path}`, { signal: ctl.signal, headers });
@@ -225,8 +237,8 @@ export class TesdaClient {
     let total = 0;
     let skipped = 0;
     for (let offset = 0; ; offset += PAGE) {
-      const page = (await this.get(`/api/v1/public/centers?limit=${PAGE}&offset=${offset}`)) as { total?: unknown; items?: unknown };
-      if (!Array.isArray(page?.items)) throw new TesdaApiError('TESDA API /api/v1/public/centers returned an unexpected body');
+      const page = (await this.get(`/api/v1/centers?limit=${PAGE}&offset=${offset}`)) as { total?: unknown; items?: unknown };
+      if (!Array.isArray(page?.items)) throw new TesdaApiError('TESDA API /api/v1/centers returned an unexpected body');
       total = num(page.total) ?? 0;
       for (const raw of page.items) {
         const c = parseCenter(raw);
@@ -240,8 +252,8 @@ export class TesdaClient {
 
   /** Names of the qualifications at least one center can assess ("Cookery II"). */
   async qualificationNames(): Promise<string[]> {
-    const list = await this.get('/api/v1/public/qualifications');
-    if (!Array.isArray(list)) throw new TesdaApiError('TESDA API /api/v1/public/qualifications returned an unexpected body');
+    const list = await this.get('/api/v1/qualifications');
+    if (!Array.isArray(list)) throw new TesdaApiError('TESDA API /api/v1/qualifications returned an unexpected body');
     return [...new Set(list.map((q) => text((q as Record<string, unknown>)?.qualification)).filter((q): q is string => !!q))];
   }
 
@@ -255,9 +267,9 @@ export class TesdaClient {
     for (const name of await this.qualificationNames()) {
       for (let offset = 0; ; offset += PAGE) {
         const page = (await this.get(
-          `/api/v1/public/centers?qualification=${encodeURIComponent(name)}&limit=${PAGE}&offset=${offset}`,
+          `/api/v1/centers?qualification=${encodeURIComponent(name)}&limit=${PAGE}&offset=${offset}`,
         )) as { total?: unknown; items?: unknown };
-        if (!Array.isArray(page?.items)) throw new TesdaApiError('TESDA API /api/v1/public/centers returned an unexpected body');
+        if (!Array.isArray(page?.items)) throw new TesdaApiError('TESDA API /api/v1/centers returned an unexpected body');
         for (const raw of page.items as Array<Record<string, unknown>>) {
           const id = num(raw?.id);
           if (id === null) continue;
@@ -272,14 +284,43 @@ export class TesdaClient {
     return byCenter;
   }
 
-  /** Graduates finishing in one month ("YYYY-MM-01"), per school. Needs the key. */
-  async graduatesByMonth(month: string): Promise<TesdaMonthGraduates> {
-    return parseGraduates(await this.get(`/api/v1/coverage/graduates-by-school?month=${encodeURIComponent(month)}`, true));
+  /**
+   * Every upcoming graduate (next 6 months), summed per point, precision, qualification and finish month as the pages
+   * arrive, so no single row is kept. About 50 pages of 2,000. Needs a key with the students permission.
+   */
+  async upcomingGraduates(): Promise<TesdaUpcomingGraduates> {
+    const groups = new Map<string, TesdaGraduateGroup>();
+    let total = 0;
+    let skipped = 0;
+    for (let offset: number | null = 0; offset !== null; ) {
+      const page = (await this.get(`/api/v1/students/all?limit=${STUDENT_PAGE}&offset=${offset}`, STUDENT_TIMEOUT_MS)) as {
+        total?: unknown;
+        items?: unknown;
+        hasMore?: unknown;
+        nextOffset?: unknown;
+      };
+      if (!Array.isArray(page?.items)) throw new TesdaApiError('TESDA API /api/v1/students/all returned an unexpected body');
+      total = num(page.total) ?? 0;
+      for (const raw of page.items) {
+        const s = parseStudent(raw);
+        if (!s) {
+          skipped++;
+          continue;
+        }
+        const key = `${s.lat}|${s.lon}|${s.precision}|${s.qualification.toLowerCase()}|${s.month}`;
+        const g = groups.get(key);
+        if (g) g.graduates++;
+        else groups.set(key, { ...s, graduates: 1 });
+      }
+      const next = num(page.nextOffset);
+      offset = page.hasMore === true && page.items.length && next !== null && next > offset ? next : null;
+    }
+    return { total, groups: [...groups.values()], skipped };
   }
 
-  /** When TESDA last recalculated its data (epoch seconds). Needs the key. */
+  /** When TESDA last recalculated its data (epoch seconds). */
   async lastRun(): Promise<number | null> {
-    const r = (await this.get('/api/v1/coverage/run', true)) as { runDate?: unknown } | null;
+    const r = (await this.get('/api/v1/coverage/run')) as { runDate?: unknown } | null;
     return tesdaEpoch(r?.runDate, 'utc');
   }
 }

@@ -10,8 +10,8 @@ export interface DensityClass {
   color: string;
 }
 
-/** light -> dark blue */
-const PALETTE = ['#dbe9f6', '#a9cbe8', '#6aa3d4', '#2f77b8', '#0b3d7a'];
+/** light -> dark purple: stands apart from the blue sea, the green land and the desert reds */
+const PALETTE = ['#efe6f7', '#d2b8ea', '#ac80d6', '#7e47b3', '#4f1c80'];
 export const NO_CANDIDATES = -1;
 const GREY = '#e6e9f0';
 

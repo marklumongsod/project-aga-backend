@@ -12,6 +12,10 @@ export class Proposal {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /** short report number (RPT-0001 on the Reports page), assigned in save order */
+  @Column({ name: 'report_no', type: 'integer', generatedIdentity: 'BY DEFAULT', unique: true })
+  reportNo: number;
+
   @Index('IDX_proposals_author')
   @Column({ name: 'author_id', type: 'uuid' })
   authorId: string;

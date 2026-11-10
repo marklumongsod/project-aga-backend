@@ -3,8 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import { nowEpoch } from '../database/epoch';
-import { ManilaMonth, upcomingMonths } from './manila-months';
-import { TesdaCenter, TesdaCenterQualification, TesdaClient, TesdaMonthGraduates } from './tesda.client';
+import { TesdaCenter, TesdaCenterQualification, TesdaClient } from './tesda.client';
 
 /**
  * Team C's hand corrections of a center's position. The TESDA API still has the raw (wrong) point for these
@@ -15,8 +14,8 @@ const KEEP_LOCAL_COORDS = ['geocode_override', 'water_fixed_geocode'];
 const SAME_POINT_DEG = 1e-4;
 /** Refuse a pull that would drop more than half of the listed centers: that is an API problem, not a closure wave. */
 const MIN_SHARE_OF_LISTED = 0.5;
-/** The API's graduates horizon is the next 6 months; ask for this month too. */
-const GRADUATE_MONTHS = 7;
+/** Refuse a students pull that would leave fewer than this share of the graduates stored now: an API problem. */
+const MIN_SHARE_OF_GRADUATES = 0.5;
 
 /** Title + level as the TESDA API writes it: "Cookery" level 2 -> "Cookery II". */
 const API_LABEL_SQL = `q.title || CASE q.level_id WHEN 1 THEN ' I' WHEN 2 THEN ' II' WHEN 3 THEN ' III' WHEN 4 THEN ' IV' ELSE '' END`;
@@ -39,7 +38,20 @@ export interface TesdaSyncStats {
   qualificationsMatchedToT2mis: number;
   /** set when the qualification lists could not be pulled; the previous ones were kept */
   qualificationsError?: string;
-  graduates: { months: Array<{ month: string; onMap: number; notOnMap: number }>; schools: number } | { skipped: string };
+  graduates: UpcomingGraduatesStats | { skipped: string };
+}
+
+export interface UpcomingGraduatesStats {
+  /** the API's total of upcoming graduates */
+  total: number;
+  /** placed in a town */
+  inTown: number;
+  /** only the province is known */
+  provinceOnly: number;
+  /** no usable point, qualification or month, or a point in no province */
+  notPlaced: number;
+  /** placed graduates whose qualification has a T2MIS QualId */
+  matchedToT2mis: number;
 }
 
 @Injectable()
@@ -67,7 +79,7 @@ export class TesdaSyncService {
   }
 
   /**
-   * Pull centers, their qualifications and graduates per school from the TESDA API. One sync at a time.
+   * Pull centers, their qualifications and the upcoming graduates (students list) from the TESDA API. One sync at a time.
    * TESDA recalculates once a night: when its run time (GET /coverage/run, needs the key) is the one the last
    * completed sync loaded, the database already has that data and nothing more is requested. `force` pulls anyway.
    */
@@ -108,9 +120,13 @@ export class TesdaSyncService {
         this.logger.warn(`TESDA qualifications not refreshed, keeping the previous ones: ${qualificationsError}`);
       }
       const centerStats = await this.db.transaction((m) => this.applyCenters(m, pulled.centers, quals));
-      const graduates = api.hasKey
-        ? await this.syncGraduates(api)
-        : ({ skipped: 'TESDA_API_KEY is not set' } as const);
+      let graduates: UpcomingGraduatesStats | { skipped: string };
+      try {
+        graduates = await this.syncGraduates(api);
+      } catch (e) {
+        graduates = { skipped: (e as Error).message };
+        this.logger.warn(`TESDA students not refreshed, keeping the previous graduates: ${graduates.skipped}`);
+      }
       const stats: TesdaSyncStats = {
         ...centerStats,
         skippedRows: pulled.skipped,
@@ -124,7 +140,9 @@ export class TesdaSyncService {
       this.logger.log(
         `TESDA sync: ${stats.centers} centers (${stats.newCenters} new, ${stats.delisted} no longer listed), ${stats.inAnalysis} in the analysis, ` +
           `${stats.qualifications} center qualifications` +
-          ('schools' in graduates ? `, graduates of ${graduates.schools} schools` : `; graduates skipped: ${graduates.skipped}`),
+          ('total' in graduates
+            ? `, ${graduates.inTown + graduates.provinceOnly} of ${graduates.total} upcoming graduates placed`
+            : `; graduates skipped: ${graduates.skipped}`),
       );
       return stats;
     } catch (e) {
@@ -253,41 +271,46 @@ export class TesdaSyncService {
     };
   }
 
-  /** Graduates per school for this month and the next six, replaced as a whole. A failure leaves the old figures. */
-  private async syncGraduates(api: TesdaClient) {
-    const months = upcomingMonths(nowEpoch(), GRADUATE_MONTHS);
-    const pulled: Array<{ mo: ManilaMonth; data: TesdaMonthGraduates }> = [];
-    for (const mo of months) pulled.push({ mo, data: await api.graduatesByMonth(mo.label) });
+  /**
+   * Upcoming graduates from the students list, replaced as a whole. The client has already summed the rows per point,
+   * qualification and month; here each point goes to its town (or only its province when that is all the API knows),
+   * and the sums per town/province, qualification and month are stored. A failure, or a pull that would drop more than
+   * half the graduates stored now, leaves the old figures.
+   */
+  private async syncGraduates(api: TesdaClient): Promise<UpcomingGraduatesStats> {
+    const pulled = await api.upcomingGraduates();
+    const g = pulled.groups;
+    const placedGraduates = g.reduce((n, x) => n + x.graduates, 0);
     return this.db.transaction(async (m) => {
-      await m.query(`DELETE FROM school_graduates`);
-      const sId: number[] = [], sMonth: number[] = [], sName: Array<string | null> = [], sProv: Array<string | null> = [];
-      const sLat: number[] = [], sLon: number[] = [], sGrad: number[] = [];
-      for (const { mo, data } of pulled)
-        for (const s of data.schools) {
-          sId.push(s.schoolId);
-          sMonth.push(mo.epoch);
-          sName.push(s.schoolName);
-          sProv.push(s.province);
-          sLat.push(s.lat);
-          sLon.push(s.lon);
-          sGrad.push(s.graduates);
-        }
+      const [{ now }] = await m.query(`SELECT coalesce(sum(graduates), 0)::int AS now FROM upcoming_graduates`);
+      if (!placedGraduates || placedGraduates < now * MIN_SHARE_OF_GRADUATES) {
+        throw new Error(`TESDA API returned ${placedGraduates} usable graduates but ${now} are stored now; nothing changed`);
+      }
+      await m.query(`DELETE FROM upcoming_graduates`);
       await m.query(
-        `INSERT INTO school_graduates (school_id, month, school_name, province_name, lat, lon, graduates, city_id)
-         SELECT u.school_id, u.month, u.school_name, u.province_name, u.lat, u.lon, u.graduates, c.id
-           FROM unnest($1::int[], $2::bigint[], $3::text[], $4::text[], $5::float8[], $6::float8[], $7::int[])
-                AS u(school_id, month, school_name, province_name, lat, lon, graduates)
-           LEFT JOIN LATERAL (${CITY_OF_POINT_SQL('ST_SetSRID(ST_MakePoint(u.lon, u.lat), 4326)')}) c ON true
-         ON CONFLICT (school_id, month) DO UPDATE SET graduates = school_graduates.graduates + EXCLUDED.graduates`,
-        [sId, sMonth, sName, sProv, sLat, sLon, sGrad],
+        `INSERT INTO upcoming_graduates (province_psgc, city_id, qualification, qualification_id, finish_month, graduates)
+         SELECT c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, min(u.qualification), t2.id, u.month, sum(u.graduates)
+           FROM unnest($1::float8[], $2::float8[], $3::text[], $4::text[], $5::bigint[], $6::int[])
+                AS u(lat, lon, precision, qualification, month, graduates)
+           JOIN LATERAL (${CITY_OF_POINT_SQL('ST_SetSRID(ST_MakePoint(u.lon, u.lat), 4326)')}) c ON true
+           LEFT JOIN (SELECT DISTINCT ON (lower(${API_LABEL_SQL})) lower(${API_LABEL_SQL}) AS label, q.id
+                        FROM qualifications q ORDER BY lower(${API_LABEL_SQL}), q.enabled DESC, q.id DESC) t2
+             ON t2.label = lower(u.qualification)
+          GROUP BY c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, lower(u.qualification), t2.id, u.month`,
+        [g.map((x) => x.lat), g.map((x) => x.lon), g.map((x) => x.precision), g.map((x) => x.qualification), g.map((x) => x.month), g.map((x) => x.graduates)],
+      );
+      const [r] = await m.query(
+        `SELECT coalesce(sum(graduates) FILTER (WHERE city_id IS NOT NULL), 0)::int AS in_town,
+                coalesce(sum(graduates) FILTER (WHERE city_id IS NULL), 0)::int AS province_only,
+                coalesce(sum(graduates) FILTER (WHERE qualification_id IS NOT NULL), 0)::int AS matched
+           FROM upcoming_graduates`,
       );
       return {
-        months: pulled.map(({ mo, data }) => ({
-          month: mo.label,
-          onMap: data.schools.reduce((n, s) => n + s.graduates, 0),
-          notOnMap: data.notOnMap,
-        })),
-        schools: new Set(sId).size,
+        total: pulled.total,
+        inTown: r.in_town,
+        provinceOnly: r.province_only,
+        notPlaced: pulled.skipped + placedGraduates - r.in_town - r.province_only,
+        matchedToT2mis: r.matched,
       };
     });
   }

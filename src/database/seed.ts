@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import * as bcrypt from 'bcryptjs';
 import { DataSource, QueryRunner } from 'typeorm';
 import { typeormOptions } from './data-source';
-import { loadQualificationDemand } from './qualification-demand';
 
 const DATA_DIR = join(__dirname, '..', '..', 'database', 'seed-data');
 const load = <T>(file: string): T[] => JSON.parse(readFileSync(join(DATA_DIR, file), 'utf8')) as T[];
@@ -53,9 +52,9 @@ async function main() {
   try {
     // The centers are about to be reloaded as the source data has them, so the log of recovered centers no longer applies.
     await qr.query(`DELETE FROM center_recovery_log`);
-    // TESDA API data (center_qualifications, school_graduates) goes too: `npm run tesda:sync` reloads it on top of the seed.
+    // TESDA API data (center_qualifications, upcoming_graduates) goes too: `npm run tesda:sync` reloads it on top of the seed.
     // So does the sync log, or the next sync would think the reseeded centers are already up to date and skip.
-    await qr.query(`TRUNCATE center_utilization, area_utilization, simulation_runs, center_qualifications, school_graduates,
+    await qr.query(`TRUNCATE center_utilization, area_utilization, simulation_runs, center_qualifications, upcoming_graduates,
       tesda_syncs, bsrs_stats, assessment_centers, qualifications, cities, provinces RESTART IDENTITY CASCADE`);
     await qr.query(
       `DELETE FROM users WHERE region_psgc IS NOT NULL OR province_psgc IS NOT NULL OR role = 'CO'`,
@@ -256,8 +255,6 @@ async function main() {
       (SELECT count(*) FROM assessment_centers) centers, (SELECT count(*) FROM assessment_centers WHERE include_in_analysis) centers_in_analysis,
       (SELECT count(*) FROM bsrs_stats) bsrs, (SELECT count(*) FROM users) users`);
     console.log('seeded', counts[0]);
-    const quals = await loadQualificationDemand(ds); // graduates per province and qualification, if the file is there
-    if (quals !== null) console.log('qualification demand rows', quals);
   } catch (e) {
     await qr.rollbackTransaction();
     throw e;

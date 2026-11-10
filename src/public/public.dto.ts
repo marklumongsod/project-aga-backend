@@ -1,3 +1,5 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { LegendBandDto } from '../dashboard/dashboard.dto';
 import { Transform, Type } from 'class-transformer';
 import {
   IsInt,
@@ -145,4 +147,15 @@ export class RouteResultDto {
   locationVerified: boolean;
   steps: RouteStepDto[];
   travelModel: string;
+}
+
+/** Headline numbers for the public finder page. Counts of centers and qualifications only: no learner or flagged figures. */
+export class PublicStatsDto {
+  /** assessment centers on the map (listed by TESDA and placed) */
+  centers: number;
+  /** distinct qualifications at least one of those centers can assess */
+  qualifications: number;
+  /** assessment desert levels: labels and map colours only (for the About page legend) */
+  @ApiProperty({ type: () => [LegendBandDto] })
+  desertLegend: ReadonlyArray<LegendBandDto>;
 }

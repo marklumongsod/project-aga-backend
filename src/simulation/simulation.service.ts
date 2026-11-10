@@ -1,7 +1,8 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { routedIsochrones } from '../centers/isochrone';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import { AuthUser } from '../common/auth.decorators';
 import {
   AreaLevel,
@@ -13,12 +14,22 @@ import {
   SimulationRun,
 } from '../database/entities';
 import { AreaScopeService } from '../scope/area-scope.service';
-import { DemandGroup, DemandService } from './demand.service';
+import { DemandGroup, DemandService, QualificationCatalog } from './demand.service';
 import { DemandRow, estimateQualificationNeed, qualificationKey } from './qualification-need';
 import { EngineResult, SimCenter, SimGroup, UtilizationEngine } from './engine/utilization-engine';
-import { AreaDeltaDto, RecommendationsDto, RecommendQueryDto, SiteRecommendationDto, SnapQueryDto, SnapResultDto, WhatIfDto, WhatIfResultDto } from './simulation.dto';
+import {
+  AreaDeltaDto,
+  PinReachQueryDto,
+  RecommendationsDto,
+  RecommendQueryDto,
+  SiteRecommendationDto,
+  SnapQueryDto,
+  SnapResultDto,
+  WhatIfDto,
+  WhatIfResultDto,
+} from './simulation.dto';
 import { haversineKm } from '../common/geo/haversine';
-import { desertLevel } from '../common/rate-band';
+import { desertLevel, isoBand } from '../common/rate-band';
 import { MatrixTravelTimeModel, pairKey } from './travel/matrix-travel-time.model';
 import { RoutingService } from './travel/routing.service';
 import { TravelMatrixService } from './travel/travel-matrix.service';
@@ -39,6 +50,12 @@ interface Inputs {
   baselines: Map<number, EngineResult>;
   /** city names for what-if responses */
   names?: Map<string, string>;
+  /** upcoming graduates per qualification, loaded the first time a qualification is asked for */
+  catalog?: QualificationCatalog;
+  offers?: Array<{ centerId: number; qualificationId: number | null; qualification: string }>;
+  byQualification?: Map<string, Inputs>;
+  /** set on the inputs of one qualification */
+  qualification?: { key: string; name: string };
 }
 
 interface AreaAgg {
@@ -97,7 +114,7 @@ export class SimulationService {
     return {
       limitMinutes: this.config.get<number>('SIM_LIMIT_MINUTES', 90),
       /** fastest average straight-line speed on any road, km/h: bounds the search only, never decides reach */
-      maxSpeedKmh: this.config.get<number>('SIM_MAX_SPEED_KMH', 75),
+      maxSpeedKmh: this.config.get<number>('SIM_MAX_SPEED_KMH', 90),
     };
   }
 
@@ -249,7 +266,7 @@ export class SimulationService {
     groups: DemandGroup[],
     r: EngineResult,
     triggeredBy: string,
-    custom?: { limitMinutes: number },
+    custom?: { limitMinutes: number; qualification?: { key: string; name: string } },
   ) {
     const limitMinutes = custom?.limitMinutes ?? this.limits.limitMinutes;
     const runRepo = this.db.getRepository(SimulationRun);
@@ -260,6 +277,7 @@ export class SimulationService {
         travelModel: this.travel.name,
         triggeredBy,
         adhoc: !!custom,
+        qualificationKey: custom?.qualification?.key ?? null,
       }),
     );
     try {
@@ -270,7 +288,9 @@ export class SimulationService {
         centers: inputs.centers.length,
         flaggedShare: r.totals.candidates ? r.totals.flagged / r.totals.candidates : 0,
         assumptions: {
-          candidates: 'BSRS completed per city (province totals split evenly where no city data)',
+          candidates: custom?.qualification
+            ? `upcoming TESDA graduates in ${custom.qualification.name}, per town (province-only figures split over the towns)`
+            : 'BSRS completed per city (province totals split by upcoming graduates where no city data)',
           centers: 'assessment centers listed by the TESDA Assessor Coverage API (synced nightly)',
           limitMinutes,
           travel: this.travel.name,
@@ -360,28 +380,75 @@ export class SimulationService {
    * (?limitMinutes=) - a one-off run with that limit. One-off runs are stored like any run (so the dashboard queries
    * read them unchanged) but flagged `adhoc`, kept for ADHOC_TTL_SECONDS and never part of the history.
    */
-  async runFor(limitMinutes?: number): Promise<SimulationRun> {
-    if (limitMinutes === undefined || limitMinutes === this.limits.limitMinutes) return this.latestRun();
+  async runFor(limitMinutes?: number, qualification?: string): Promise<SimulationRun> {
+    const qualKey = qualification ? qualificationKey(qualification) : '';
+    const limit = limitMinutes ?? this.limits.limitMinutes;
+    if (!qualKey && limit === this.limits.limitMinutes) return this.latestRun();
     await this.latestRun(); // same 404 as the default path when nothing has been simulated yet
-    const key = String(limitMinutes);
+    const key = `${limit}|${qualKey}`;
     const busy = this.adhocRunning.get(key);
     if (busy) return busy;
-    const job = this.adhocRun(limitMinutes).finally(() => this.adhocRunning.delete(key));
+    const job = this.adhocRun(limit, qualKey).finally(() => this.adhocRunning.delete(key));
     this.adhocRunning.set(key, job);
     return job;
   }
 
-  private async adhocRun(limitMinutes: number): Promise<SimulationRun> {
+  private async adhocRun(limitMinutes: number, qualKey: string): Promise<SimulationRun> {
     const cutoff = nowEpoch() - ADHOC_TTL_SECONDS;
     await this.db.query(`DELETE FROM simulation_runs WHERE adhoc AND started_at < $1`, [cutoff]);
     const fresh = await this.db.getRepository(SimulationRun).findOne({
-      where: { status: RunStatus.COMPLETED, adhoc: true, limitMinutes },
+      where: { status: RunStatus.COMPLETED, adhoc: true, limitMinutes, qualificationKey: qualKey || IsNull() },
       order: { finishedAt: 'DESC' },
     });
     if (fresh) return fresh;
-    const inputs = await this.loadInputs();
+    const inputs = qualKey ? await this.qualificationInputs(qualKey) : await this.loadInputs();
     const current = this.engine(inputs.centers, this.travel, limitMinutes).run(inputs.current);
-    return this.persist(inputs, inputs.current, current, 'adhoc', { limitMinutes });
+    return this.persist(inputs, inputs.current, current, 'adhoc', { limitMinutes, qualification: inputs.qualification });
+  }
+
+  private async qualificationCatalog(inputs: Inputs) {
+    inputs.catalog ??= await this.demand.qualificationCatalog();
+    inputs.offers ??= await this.db.query(
+      `SELECT center_id AS "centerId", qualification_id AS "qualificationId", qualification
+         FROM center_qualifications WHERE accredited_until IS NULL OR accredited_until >= $1`,
+      [nowEpoch()],
+    );
+    return { catalog: inputs.catalog!, offers: inputs.offers! };
+  }
+
+  /** The simulation inputs for one qualification: its candidates, and only the centers accredited for it. */
+  private async qualificationInputs(raw: string): Promise<Inputs> {
+    const inputs = await this.loadInputs();
+    const key = qualificationKey(raw);
+    const cached = inputs.byQualification?.get(key);
+    if (cached) return cached;
+    const { catalog, offers } = await this.qualificationCatalog(inputs);
+    const q = catalog.byKey.get(key);
+    if (!q) throw new BadRequestException('Unknown qualification');
+    const ids = new Set(offers.filter((o) => qualificationKey(o.qualification) === key || (o.qualificationId !== null && q.ids.has(o.qualificationId))).map((o) => o.centerId));
+    const derived: Inputs = {
+      ...inputs,
+      centers: inputs.centers.filter((c) => ids.has(c.id)),
+      current: this.demand.qualificationGroups(catalog.cities, q),
+      baselines: new Map(),
+      qualification: { key, name: q.name },
+    };
+    (inputs.byQualification ??= new Map()).set(key, derived);
+    return derived;
+  }
+
+  /** The qualifications with upcoming graduates, and how many listed centers are accredited for each. */
+  async qualifications(): Promise<Array<{ key: string; name: string; centers: number }>> {
+    const inputs = await this.loadInputs();
+    const { catalog, offers } = await this.qualificationCatalog(inputs);
+    const listed = new Set(inputs.centers.map((c) => c.id));
+    return [...catalog.byKey.values()]
+      .map((q) => ({
+        key: q.key,
+        name: q.name,
+        centers: new Set(offers.filter((o) => listed.has(o.centerId) && (qualificationKey(o.qualification) === q.key || (o.qualificationId !== null && q.ids.has(o.qualificationId)))).map((o) => o.centerId)).size,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**
@@ -420,7 +487,7 @@ export class SimulationService {
    */
   async recommend(user: AuthUser, q: RecommendQueryDto): Promise<RecommendationsDto> {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const inputs = await this.loadInputs();
+    const inputs = q.qualification ? await this.qualificationInputs(q.qualification) : await this.loadInputs();
     const limitMinutes = q.limitMinutes ?? this.limits.limitMinutes;
     const base = this.baselineFor(inputs, limitMinutes);
     const inArea = (g: DemandGroup) =>
@@ -498,12 +565,14 @@ export class SimulationService {
       usedSites.add(chosen.j);
       chosen.served.forEach((g) => taken.add(g.key));
     }
-    // Qualifications to offer: the graduates' qualification mix of the provinces each site would serve.
+    // Qualifications to offer: the upcoming graduates' qualification mix of the provinces each site would serve.
     const provinces = [...new Set(picks.flatMap((p) => p.served.map((g) => g.provincePsgc)))];
     const demand: DemandRow[] = provinces.length
       ? await this.db.query(
-          `SELECT province_psgc AS "provincePsgc", qualification_id AS "qualificationId", qualification, graduates
-             FROM province_qualification_graduates WHERE province_psgc = ANY($1::text[])`,
+          `SELECT province_psgc AS "provincePsgc", min(qualification_id) AS "qualificationId", min(qualification) AS qualification,
+                  sum(graduates)::int AS graduates
+             FROM upcoming_graduates WHERE province_psgc = ANY($1::text[])
+            GROUP BY province_psgc, lower(qualification)`,
           [provinces],
         )
       : [];
@@ -523,10 +592,11 @@ export class SimulationService {
         (supplyIndex.get(k) ?? supplyIndex.set(k, new Set()).get(k)!).add(o.centerId);
       }
     }
-    const supply = (provs: Set<string>, qualificationId: number, qualification: string) => {
+    const supply = (provs: Set<string>, qualificationId: number | null, qualification: string) => {
       const centers = new Set<number>();
       for (const prov of provs) {
-        for (const k of [`${prov}|id:${qualificationId}`, `${prov}|k:${qualificationKey(qualification)}`]) for (const c of supplyIndex.get(k) ?? []) centers.add(c);
+        for (const k of [qualificationId !== null ? `${prov}|id:${qualificationId}` : null, `${prov}|k:${qualificationKey(qualification)}`])
+          for (const c of (k && supplyIndex.get(k)) || []) centers.add(c);
       }
       return centers.size;
     };
@@ -551,13 +621,17 @@ export class SimulationService {
       desertCandidates: deserts.reduce((n, c) => n + c.count, 0),
       sites,
       qualificationSource: demand.length
-        ? "Graduates per province and qualification from the team's graduate list. The province's mix is applied to the candidates the site would serve, so the counts are estimates."
+        ? "Upcoming TESDA graduates (next 6 months) per province and qualification. The province's mix is applied to the candidates the site would serve, so the counts are estimates."
         : null,
     };
   }
 
   /** Drag and drop: add a proposed center, re-run the check in memory, compare. Nothing is stored. */
-  async whatIf(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
+  /**
+   * Check a proposed center's pin (the office may plan there, on land, inside the area asked for) and place it: the
+   * city it lands in and that city's island. Shared by the what-if and the pin's reach map.
+   */
+  private async placePin(user: AuthUser, dto: { lat: number; lon: number; level?: AreaLevel; code?: string }) {
     if ((dto.level === undefined) !== (dto.code === undefined))
       throw new BadRequestException('level and code go together');
     // the area to plan in and report on: the one asked for (the office must be allowed to see it), else the home area
@@ -568,7 +642,6 @@ export class SimulationService {
     if (dto.level && !(await this.scope.pointInArea(planArea, dto.lat, dto.lon))) {
       throw new BadRequestException(`Drop the new center inside ${planArea.name} (on land)`);
     }
-    const inputs = await this.loadInputs();
     const [where] = await this.db.query(
       `SELECT c.key, c.name, c.island_id, c.province_psgc, c.region_psgc, p.name AS province_name, r.name AS region_name
          FROM cities c
@@ -586,6 +659,101 @@ export class SimulationService {
       provincePsgc: where?.province_psgc ?? null,
       regionPsgc: where?.region_psgc ?? null,
     };
+    return { planArea, where, pin };
+  }
+
+  /**
+   * The cities a proposed center would reach within the travel limit, as GeoJSON for the planner's map (shaded like a
+   * clicked center's reach). Uses the what-if's own travel times, so the shaded area matches the what-if result.
+   */
+  /**
+   * True drive-time areas around a proposed center (a dropped pin), as the dashboard draws for an existing center: a
+   * grid around the pin routed by road and ferry, banded into thirds of the travel limit. The pin goes through the same
+   * scope check as its reach. Cached for 10 minutes per point and limit.
+   */
+  async pinIsochrone(user: AuthUser, dto: PinReachQueryDto) {
+    const { pin } = await this.placePin(user, dto);
+    if (!this.routing.enabled) throw new ServiceUnavailableException('Drive-time areas need the routing service, which is not enabled on this server');
+    const limitMinutes = dto.limitMinutes ?? this.limits.limitMinutes;
+    const key = `${pin.lat.toFixed(4)}|${pin.lon.toFixed(4)}|${limitMinutes}`;
+    const hit = this.pinIsoCache.get(key);
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
+    const iso = await routedIsochrones({ lon: pin.lon, lat: pin.lat }, limitMinutes, this.searchKm(limitMinutes), (s, d) => this.routing.table(s, d));
+    if (!iso) throw new ServiceUnavailableException('Drive-time areas are unavailable right now. Try again in a moment.');
+    const value = {
+      type: 'FeatureCollection' as const,
+      properties: {
+        center: { id: 0, name: 'New assessment center', lat: pin.lat, lon: pin.lon },
+        minutes: iso.breaks,
+        radiusKm: iso.radiusKm,
+        spacingKm: iso.spacingKm,
+        travelModel: this.routing.label,
+        gridPoints: iso.built.points,
+        reachedPoints: iso.built.reached,
+        samples: iso.built.samples,
+      },
+      features: iso.features,
+    };
+    this.pinIsoCache.set(key, { at: Date.now(), value });
+    if (this.pinIsoCache.size > 50) this.pinIsoCache.delete(this.pinIsoCache.keys().next().value!);
+    return value;
+  }
+
+  private readonly pinIsoCache = new Map<string, { at: number; value: unknown }>();
+
+  async pinReach(user: AuthUser, dto: PinReachQueryDto) {
+    const { pin } = await this.placePin(user, dto);
+    const limitMinutes = dto.limitMinutes ?? this.limits.limitMinutes;
+    // every city near the pin, with or without candidates: the map shows where the center reaches, not only demand
+    const rows: Array<{ key: string; name: string; island_id: number | null; lat: number; lon: number; km: number; geometry: string }> =
+      await this.db.query(
+        `SELECT key, name, island_id, lat, lon,
+                ST_Distance(centroid::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) / 1000 AS km,
+                ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0007), 5) AS geometry
+           FROM cities
+          WHERE ST_DWithin(centroid::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3 * 1000)`,
+        [pin.lon, pin.lat, this.searchKm(limitMinutes)],
+      );
+    // cities -> the pin by road and ferry, one OSRM table call (the what-if times the pin the same way); else the estimate
+    const live = await this.routing.table(
+      rows.map((r) => ({ lon: r.lon, lat: r.lat })),
+      [{ lon: pin.lon, lat: pin.lat }],
+    );
+    const dest = { id: pin.id, lat: pin.lat, lon: pin.lon, islandId: pin.islandId };
+    const features = rows
+      .map((r, i) => ({
+        r,
+        minutes: live?.minutes[i]?.[0] ?? this.travel.minutes({ key: r.key, lat: r.lat, lon: r.lon, islandId: r.island_id }, dest, r.km),
+      }))
+      .filter((x) => x.minutes <= limitMinutes)
+      .map(({ r, minutes }) => ({
+        type: 'Feature' as const,
+        id: r.key,
+        geometry: JSON.parse(r.geometry),
+        properties: {
+          key: r.key,
+          name: r.name,
+          km: Math.round(r.km * 10) / 10,
+          minutes: Math.round(minutes),
+          withinLimit: true,
+          isoBand: isoBand(minutes, limitMinutes),
+        },
+      }));
+    return {
+      type: 'FeatureCollection' as const,
+      properties: {
+        center: { id: pin.id, name: 'New assessment center', lat: pin.lat, lon: pin.lon },
+        limitMinutes,
+        travelModel: live ? this.routing.label : this.travel.name,
+        citiesWithinLimit: features.length,
+      },
+      features,
+    };
+  }
+
+  async whatIf(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
+    const { planArea, where, pin } = await this.placePin(user, dto);
+    const inputs = await this.loadInputs();
     const limitMinutes = dto.limitMinutes ?? this.limits.limitMinutes;
     const before = this.baselineFor(inputs, limitMinutes);
     const after = this.engine(

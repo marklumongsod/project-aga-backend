@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Public } from '../common/auth.decorators';
-import { NearestCentersDto, RouteDto, RouteResultDto, SearchDto } from './public.dto';
+import { NearestCentersDto, PublicStatsDto, RouteDto, RouteResultDto, SearchDto } from './public.dto';
 import { PublicService } from './public.service';
 
 /** Public learner finder - no sign-in, rate limited, no learner or congestion data. */
@@ -10,6 +10,12 @@ import { PublicService } from './public.service';
 @Controller('public')
 export class PublicController {
   constructor(private readonly svc: PublicService) {}
+
+  /** Headline numbers for the finder page: centers on the map and qualifications they assess */
+  @Get('stats')
+  stats(): Promise<PublicStatsDto> {
+    return this.svc.stats();
+  }
 
   /** Search box: "Your city or municipality" */
   @Get('places')

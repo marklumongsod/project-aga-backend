@@ -30,6 +30,23 @@ export class DashboardQueryDto extends AreaQueryDto {
   @Min(MIN_LIMIT_MINUTES)
   @Max(MAX_LIMIT_MINUTES)
   limitMinutes?: number;
+
+  /**
+   * Limit the analysis to one qualification (a `key` from GET /dashboard/qualifications): its upcoming graduates and
+   * only the centers accredited for it. Runs a one-off simulation (kept for 30 minutes).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  qualification?: string;
+}
+
+export class QualificationOptionDto {
+  /** pass as ?qualification= */
+  key: string;
+  name: string;
+  /** listed centers accredited for it */
+  centers: number;
 }
 
 export class AreaStatsDto {

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../common/auth.decorators';
-import { RecommendationsDto, RecommendQueryDto, SnapQueryDto, SnapResultDto, WhatIfDto, WhatIfResultDto } from './simulation.dto';
+import { PinReachQueryDto, RecommendationsDto, RecommendQueryDto, SnapQueryDto, SnapResultDto, WhatIfDto, WhatIfResultDto } from './simulation.dto';
 import { SimulationService } from './simulation.service';
 
 @ApiTags('simulation')
@@ -23,6 +23,18 @@ export class SimulationController {
   @Get('snap')
   snap(@CurrentUser() user: AuthUser, @Query() q: SnapQueryDto): Promise<SnapResultDto> {
     return this.sim.snapPin(user, q);
+  }
+
+  /** The cities a proposed center would reach within the travel limit, as GeoJSON (the planner shades them green). */
+  @Get('reach')
+  reach(@CurrentUser() user: AuthUser, @Query() q: PinReachQueryDto) {
+    return this.sim.pinReach(user, q);
+  }
+
+  /** True drive-time areas around a proposed center, by road and ferry, in thirds of the travel limit (the planner's map). */
+  @Get('isochrone')
+  isochrone(@CurrentUser() user: AuthUser, @Query() q: PinReachQueryDto) {
+    return this.sim.pinIsochrone(user, q);
   }
 
   /**

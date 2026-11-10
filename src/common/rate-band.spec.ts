@@ -11,12 +11,12 @@ describe('desertLevel (team doc: assessment desert levels by enrollee-candidates
     [0, 0],
     [-3, 0],
     [1, 1],
-    [20, 1],
-    [21, 2],
-    [40, 2],
-    [41, 3],
-    [60, 3],
-    [61, 4],
+    [200, 1],
+    [201, 2],
+    [400, 2],
+    [401, 3],
+    [600, 3],
+    [601, 4],
     [4525, 4],
   ])('%i candidates -> level %i', (candidates, level) => {
     expect(desertLevel(candidates)).toBe(level);
@@ -24,7 +24,7 @@ describe('desertLevel (team doc: assessment desert levels by enrollee-candidates
 
   it('has a legend entry for every level, from "not a desert" to level 4', () => {
     expect(DESERT_LEVELS.map((l) => l.band)).toEqual([0, 1, 2, 3, 4]);
-    expect(DESERT_LEVELS[4]!.label).toContain('more than 60');
+    expect(DESERT_LEVELS[4]!.label).toContain('601 candidates and up');
   });
 });
 

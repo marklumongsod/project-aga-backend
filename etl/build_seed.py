@@ -290,7 +290,9 @@ for r in sheet('BSRS Scholarship Data Per Citii'):
     if r.get('enrolled_count') is None or not r.get('city_mun'):
         continue
     rc = region_code(r['region'])
-    pcs = prov_by.get(PROV_ALIAS.get(norm(r['province']), norm(r['province'])), [])
+    # NCR has no provinces to match by name; matching "Quezon City" as a province would hit Quezon province
+    # (norm() drops "city"), so NCR rows only match cities by name inside NCR.
+    pcs = [] if rc == '1300000000' else prov_by.get(PROV_ALIAS.get(norm(r['province']), norm(r['province'])), [])
     hit = None
     if ', city of manila' in str(r['city_mun']).lower():   # Manila districts (Binondo, Ermita, ...) -> City of Manila
         r = dict(r, city_mun='City of Manila')

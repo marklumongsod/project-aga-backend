@@ -52,6 +52,10 @@ export class SimulationRun {
   @Column({ type: 'boolean', default: false })
   adhoc: boolean;
 
+  /** a one-off run limited to one qualification (`qualificationKey`); null = every qualification */
+  @Column({ name: 'qualification_key', type: 'varchar', nullable: true })
+  qualificationKey: string | null;
+
   @Column({ name: 'started_at', type: 'bigint', default: () => EPOCH_NOW_SQL, transformer: epochTransformer })
   startedAt: number;
 

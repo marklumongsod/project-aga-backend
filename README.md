@@ -97,9 +97,9 @@ flagged share = flagged / candidates
 
 ### Assessment deserts, hotspots and density (team doc)
 
-- **Assessment desert**: a city or municipality that has candidates and **no assessment center within the travel range** (the travel limit by road and ferry, exactly the simulation's reachability test). Computed in every run and stored per area. **Levels** by candidates: 1 = 1-20, 2 = 21-40, 3 = 41-60, 4 = more than 60. Provinces and regions carry the number of desert cities inside and the highest level.
+- **Assessment desert**: a city or municipality that has candidates and **no assessment center within the travel range** (the travel limit by road and ferry, exactly the simulation's reachability test). Computed in every run and stored per area. **Levels** by candidates: 1 = 1-200, 2 = 201-400, 3 = 401-600, 4 = 601 and up. Provinces and regions carry the number of desert cities inside and the highest level.
 - **Density** = candidates in an area whether or not a center is nearby. The API classes each set of sibling areas into quintiles (`densityBand`, `densityLegend`); the densest fifth is the **hotspot**.
-- **Estimated candidates.** BSRS has a count for only some cities (about 20% of the candidates). For the rest, the province total is split evenly over its other cities. `estimatedCandidates` says how much of a city's figure is that filled-in share (province and national totals are measured). At city level, density is mostly this even share, so differences between cities of one province are not real.
+- **Estimated candidates.** BSRS has a count for only some cities (about 20% of the candidates). For the rest, the province total is split over its other cities: 20% evenly and 80% by each town's upcoming TESDA graduates (`upcoming_graduates`, from the API's students list, synced nightly), so the towns with more graduates get more and every town keeps a floor; an even split where a province has no graduate data. `estimatedCandidates` says how much of a city's figure is that filled-in share (province and national totals are measured). At city level, density is mostly this estimate, so read differences between cities of one province as rough.
 
 ### Data quality: can removed data be saved?
 
@@ -117,9 +117,9 @@ Coordinates are WGS84 longitude/latitude, **EPSG:4326**, in every PostGIS column
 
 | Input | Now | Replace with |
 | --- | --- | --- |
-| Candidates | BSRS completed per city. Province totals are split evenly where there is no city data; NCR districts are split over their cities | T2MIS enrollee-candidates per city |
+| Candidates | BSRS completed per city. Province totals are split by TESDA graduates per town (20% evenly) where there is no city data; NCR districts are split over their cities | T2MIS enrollee-candidates per city |
 | Travel time | `TRAVEL_MODEL=estimate`: straight line × 1.35 at 35 km/h, +90 min per sea crossing. `TRAVEL_MODEL=osrm`: real road + ferry times from OpenStreetMap (see *Real travel times* below) | Same, plus traffic and ferry schedules (OSRM knows neither) |
-| Next quarter | Not built: there is no forecast. The TESDA graduates sync keeps `school_graduates` for it | Team C ML forecast (seasonal naive / SARIMA / gradient boosting with lags) |
+| Next quarter | Not built: there is no forecast. The TESDA students sync keeps `upcoming_graduates` (per finish month) for it | Team C ML forecast (seasonal naive / SARIMA / gradient boosting with lags) |
 | Per qualification | Not computed: per-qualification candidate counts exist only for BARMM | BSRS / T2MIS counts per qualification, then the reach check can run once per course |
 
 ### Real travel times (OSRM)
@@ -131,7 +131,7 @@ curl -L -o data/osm/philippines.osm.pbf https://download.geofabrik.de/asia/phili
 sh scripts/osrm-prepare.sh                       # one time, about a minute here (needs ~5 GB RAM)
 docker compose --profile routing up -d osrm      # http://localhost:5001 (5000 is taken by AirPlay on macOS)
 npm run db:migrate                               # creates travel_times
-npm run travel:build                             # ~15 s: routes every city to every center within the search radius (~113 km at 90 minutes, from SIM_MAX_SPEED_KMH)
+npm run travel:build                             # ~15 s: routes every city to every center within the search radius (135 km at 90 minutes, from SIM_MAX_SPEED_KMH)
 # in .env: TRAVEL_MODEL=osrm  OSRM_URL=http://localhost:5001
 npm run simulate                                 # re-run; the run records which model it used
 ```
@@ -139,7 +139,8 @@ npm run simulate                                 # re-run; the run records which
 - **How it's used.** The simulation reads a precomputed matrix (`travel_times`, one row per city-center pair within the search radius), so a run needs no network. Interactive calls (finder, reach, what-if pin) ask OSRM live for the exact point, in one batched call each.
 - **Directions.** `GET /public/route` returns the route line and turn-by-turn steps (OSRM gives maneuvers, not text, so the sentences are built in `route-instructions.ts`). It only routes to an assessment center, never to an arbitrary point. A center within 500 m gets `mode: "walking"` instead: one straight leg (about 4.8 km/h, ×1.3 for paths) that needs no routing server. Beyond that it is `mode: "driving"`, and the response says how far the route's ends are from the real points (`snapped`) because OSRM starts and ends at the nearest road. The finder's "Get directions" link opens Google Maps (`directionsUrl`).
 - **Fallbacks.** A pair OSRM can't route (about 0.01% here) and any call made while OSRM is down use the estimate; the API never errors because of routing. The response's `travelModel` says which was used.
-- **Limits.** OSRM uses the car profile and ignores traffic, ferry timetables and boarding waits, so real trips take longer. Where OSM has no ferry link between islands there is no route and the estimate (+90 min) applies.
+- **Speeds.** The car graph uses Philippine speed limits (`scripts/osrm/car-ph.lua`): expressways 100 km/h, national roads (trunk, primary) 80 (RA 4136 open country), secondary and tertiary roads 40 (through streets), local streets 30, crowded and service roads 20; a posted limit tagged in OpenStreetMap wins. Change a speed there, then `sh scripts/osrm-prepare.sh car`, restart `osrm`, `npm run travel:build` and `npm run simulate`.
+- **Limits.** Times assume driving at the limit and ignore traffic, ferry timetables and boarding waits, so real trips take longer. Where OSM has no ferry link between islands there is no route and the estimate (+90 min) applies.
 - Rebuild the matrix (`npm run travel:build`) after loading a newer OSM extract or after the centers or cities change. The next daily run reloads it; a separate `npm run simulate` process always reads the table fresh (restart the server to pick it up at once).
 
 ## Data and privacy
@@ -149,12 +150,13 @@ npm run simulate                                 # re-run; the run records which
 - **Geography**: PSGC 2023 (faeldon/philippines-json-maps, low resolution).
   - 15 highly urbanized cities missing from those files (Cebu City, Mandaue, Lapu-Lapu, Baguio, Iloilo City, Cagayan de Oro, General Santos, Zamboanga, …) are rebuilt from the holes in their province polygons, with `derived_boundary = true` and **no PSGC code** (not guessed). Bacolod, Ormoc, Isabela City and Cotabato City were not recovered.
   - `island_id` groups connected land; a trip between islands adds the ferry allowance.
-- **Centers**: the **TESDA Assessor Coverage API** (`TESDA_API_URL`, Swagger at https://sap-sis.tesda.gov.ph/swagger/index.html) is the source. `npm run tesda:sync` (and the nightly job, just before the simulation) pulls every listed center (about 2,400), the qualifications each one can assess, and graduates per school for the next 6 months (needs `TESDA_API_KEY`). Only listed centers are analysed.
+- **Centers**: the **TESDA Assessor Coverage API** (`TESDA_API_URL`, Swagger at https://sap-sis.tesda.gov.ph/swagger/index.html) is the source. `npm run tesda:sync` (and the nightly job, just before the simulation) pulls every listed center (about 2,400), the qualifications each one can assess (`/api/v1/centers`, `/api/v1/qualifications`), and every upcoming graduate of the next 6 months (`/api/v1/students/all`, about 97,000 rows in pages of 2,000; the key needs the students permission). Every call needs `TESDA_API_KEY`. Only listed centers are analysed.
+  - Upcoming graduates are summed as the pages arrive and stored only as counts per town (or per province, when the API knows only the province), qualification and finish month in `upcoming_graduates`. They weight the split of province candidate totals and give the recommendation's "offer first" qualifications. If the students pull fails (for example a key without the students permission), the previous figures are kept and the centers still update.
   - The seed still loads Team C's geocoded `assessment_center_points.geojson` (5,129) first: it supplies ids, Team C's hand-corrected positions (`geocode_override`, `water_fixed_geocode`; the API still has the raw point for those, so the corrected one is kept) and the rows older results point at. Centers the API no longer lists stay as `tesda_listed = false` and are out of the analysis.
-  - The sync is skipped when TESDA has not recalculated since the last one (`GET /coverage/run`), so a quiet night costs one request; `npm run tesda:sync -- --force` pulls anyway. Requests go one at a time, 250 ms apart (the API rate-limits with 429). A pull that would drop more than half the listed centers is refused.
+  - The sync is skipped when TESDA has not recalculated since the last one (`GET /coverage/run`), so a quiet night costs one request; `npm run tesda:sync -- --force` pulls anyway. Requests go one at a time, 250 ms apart (the API rate-limits with 429). A pull that would drop more than half the listed centers, or more than half the stored graduates, is refused.
   - Each run is logged in `tesda_syncs`. API qualification names ("Cookery II") are matched to a T2MIS QualId where title + level match (about 80%).
   - After a sync with `TRAVEL_MODEL=osrm`, run `npm run travel:build` so new centers get routed times (they use the estimate until then).
-- **Not stored**: names, ULI, contact details, civil status or addresses of learners. The T2MIS Student Profile and TSP sheets are never read; graduates per school are counts only (Data Privacy Act of 2012, RA 10173).
+- **Not stored**: names, ULI, contact details, civil status or addresses of learners. The T2MIS Student Profile and TSP sheets are never read. The students list has no names or ids; of each row only the point, qualification and finish month are read (barangay and school are dropped), and only sums are stored (Data Privacy Act of 2012, RA 10173).
 
 To refresh the data: put the raw files in `data/raw/`, then run `pip install -r etl/requirements.txt`, `npm run etl` and `npm run db:seed`.
 

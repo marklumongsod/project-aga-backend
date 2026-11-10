@@ -1,5 +1,5 @@
 /**
- * Pull assessment centers, their qualifications and graduates per school from the TESDA API once: npm run tesda:sync
+ * Pull assessment centers, their qualifications and the upcoming graduates from the TESDA API once: npm run tesda:sync
  * Skipped when TESDA has not recalculated since the last sync; `npm run tesda:sync -- --force` pulls anyway.
  * Then: npm run data:quality -- --apply (place centers at sea), npm run travel:build (osrm only), npm run simulate.
  */

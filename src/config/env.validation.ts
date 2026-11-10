@@ -81,14 +81,14 @@ export class EnvironmentVariables {
 
   /**
    * The fastest average straight-line speed on any road (km/h), from the road network itself: even the fastest
-   * trips in the routed data average under 65. It is ONLY used to bound how far to look (limit minutes x this speed,
-   * ~112 km at 90 minutes) so nothing reachable is missed. Reach is decided by road travel time alone, never by distance.
+   * trips in the routed data (Philippine speed limits) average under 85. It is ONLY used to bound how far to look (limit minutes x this speed,
+   * ~135 km at 90 minutes) so nothing reachable is missed. Reach is decided by road travel time alone, never by distance.
    */
   @Transform(toInt)
   @IsInt()
   @Min(30)
   @Max(200)
-  SIM_MAX_SPEED_KMH = 75;
+  SIM_MAX_SPEED_KMH = 90;
 
   @IsString()
   SIM_CRON = '0 2 * * *';

@@ -2,6 +2,7 @@ import { ClassSerializerInterceptor, INestApplication, ValidationPipe, Versionin
 import { ConfigService } from '@nestjs/config';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import compression from 'compression';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -12,6 +13,8 @@ export function configureApp(app: INestApplication) {
   const proxies = config.get<number>('TRUST_PROXY', 0);
   if (proxies > 0) (app.getHttpAdapter().getInstance() as { set(k: string, v: unknown): void }).set('trust proxy', proxies);
   app.use(helmet());
+  // gzip JSON over 1 KB: the map payloads (heat points, shapes, drive-time grids) shrink 80-90% on the wire
+  app.use(compression({ threshold: 1024 }));
   const origins = (config.get<string>('CORS_ORIGINS') ?? '')
     .split(',')
     .map((o) => o.trim())

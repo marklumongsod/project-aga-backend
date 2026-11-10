@@ -1,4 +1,5 @@
-import { parseCenter, parseGraduates, parseQualifications, TesdaApiError, TesdaClient, tesdaEpoch } from './tesda.client';
+import { parseCenter, parseQualifications, parseStudent, TesdaApiError, TesdaClient, tesdaEpoch } from './tesda.client';
+import { manilaMonthStart } from './manila-months';
 
 const center = (id: number, extra: Record<string, unknown> = {}) => ({
   id,
@@ -69,21 +70,30 @@ describe('parsing', () => {
     });
     expect(q).toEqual([{ qualification: 'cookery II', accreditedUntil: tesdaEpoch('2028-01-01T00:00:00') }]);
   });
-  it('reads graduates per school and skips schools with no usable point or count', () => {
-    const g = parseGraduates({
-      total: 30,
-      notOnMap: 10,
-      schools: [
-        { schoolId: 1, schoolName: 'A', province: 'Laguna', latitude: 14.4, longitude: 120.9, graduates: 15 },
-        { schoolId: 2, latitude: 0, longitude: 0, graduates: 5 },
-        { schoolId: 3, latitude: 14.4, longitude: 120.9, graduates: 0 },
-      ],
+  it('keeps only the point, precision, qualification and month of a student row', () => {
+    const s = parseStudent({
+      region: 'NCR',
+      province: 'CAMANAVA',
+      city: 'Caloocan City',
+      barangay: 'Barangay 156',
+      qualification: 'Cookery II',
+      school: 'A SCHOOL',
+      finishMonth: '2026-12',
+      latitude: 14.71554,
+      longitude: 121.0065636,
+      precision: 'city',
+      nearestCenter: 'A CENTER',
+      nearestCenterKm: 20,
     });
-    expect(g).toEqual({
-      total: 30,
-      notOnMap: 10,
-      schools: [{ schoolId: 1, schoolName: 'A', province: 'Laguna', lat: 14.4, lon: 120.9, graduates: 15 }],
-    });
+    expect(s).toEqual({ lat: 14.71554, lon: 121.0065636, precision: 'city', qualification: 'Cookery II', month: manilaMonthStart('2026-12') });
+  });
+  it('drops a student row with no usable point, qualification or month', () => {
+    const ok = { qualification: 'Cookery II', finishMonth: '2026-12', latitude: 14.7, longitude: 121, precision: 'province' };
+    expect(parseStudent(ok)!.precision).toBe('province');
+    expect(parseStudent({ ...ok, latitude: null })).toBeNull();
+    expect(parseStudent({ ...ok, latitude: 35.6, longitude: 139.7 })).toBeNull();
+    expect(parseStudent({ ...ok, qualification: '' })).toBeNull();
+    expect(parseStudent({ ...ok, finishMonth: null })).toBeNull();
   });
 });
 
@@ -94,24 +104,24 @@ describe('TesdaClient', () => {
       const items = Array.from({ length: offset === 400 ? 5 : 200 }, (_, i) => center(offset + i + 1));
       return { status: 200, body: { total: 405, items } };
     });
-    const r = await new TesdaClient('https://tesda.test/', { fetchFn: f.fetchFn, sleep: f.sleep }).centers();
+    const r = await new TesdaClient('https://tesda.test/', { apiKey: 'k', fetchFn: f.fetchFn, sleep: f.sleep }).centers();
     expect(r.centers).toHaveLength(405);
     expect(f.calls.map((c) => c.url)).toEqual([
-      'https://tesda.test/api/v1/public/centers?limit=200&offset=0',
-      'https://tesda.test/api/v1/public/centers?limit=200&offset=200',
-      'https://tesda.test/api/v1/public/centers?limit=200&offset=400',
+      'https://tesda.test/api/v1/centers?limit=200&offset=0',
+      'https://tesda.test/api/v1/centers?limit=200&offset=200',
+      'https://tesda.test/api/v1/centers?limit=200&offset=400',
     ]);
   });
 
   it('builds each center qualification list from one paged list per qualification', async () => {
     const f = fake((url) => {
-      if (url.endsWith('/public/qualifications'))
+      if (url.endsWith('/api/v1/qualifications'))
         return { status: 200, body: [{ qualification: 'Cookery II', centers: 2 }, { qualification: 'Bread and Pastry Production II', centers: 1 }] };
       const q = new URL(url).searchParams.get('qualification');
       const items = q === 'Cookery II' ? [center(1), center(2)] : [center(2)];
       return { status: 200, body: { total: items.length, items } };
     });
-    const by = await new TesdaClient('https://tesda.test', { fetchFn: f.fetchFn, sleep: f.sleep }).centerQualifications();
+    const by = await new TesdaClient('https://tesda.test', { apiKey: 'k', fetchFn: f.fetchFn, sleep: f.sleep }).centerQualifications();
     expect(f.calls).toHaveLength(3);
     expect(by.get(1)!.map((q) => q.qualification)).toEqual(['Cookery II']);
     expect(by.get(2)!.map((q) => q.qualification)).toEqual(['Cookery II', 'Bread and Pastry Production II']);
@@ -119,7 +129,7 @@ describe('TesdaClient', () => {
 
   it('waits long after a 429 (the API sends no Retry-After), then succeeds', async () => {
     const f = fake((_url, n) => (n === 1 ? { status: 429 } : { status: 200, body: [] }));
-    const client = new TesdaClient('https://tesda.test', { fetchFn: f.fetchFn, sleep: f.sleep, rateLimitDelayMs: 15000, minIntervalMs: 0 });
+    const client = new TesdaClient('https://tesda.test', { apiKey: 'k', fetchFn: f.fetchFn, sleep: f.sleep, rateLimitDelayMs: 15000, minIntervalMs: 0 });
     await expect(client.qualificationNames()).resolves.toEqual([]);
     expect(f.calls).toHaveLength(2);
     expect(Math.min(...f.sleeps)).toBeGreaterThanOrEqual(15000 * 0.75);
@@ -136,9 +146,32 @@ describe('TesdaClient', () => {
     expect(f.calls[0]!.headers!['X-Api-Key']).toBe('secret-key');
   });
 
-  it('refuses a coverage call without a key, before any request', async () => {
+  it('refuses any call without a key, before a request', async () => {
     const f = fake(() => ({ status: 200, body: {} }));
-    await expect(new TesdaClient('https://tesda.test', { fetchFn: f.fetchFn }).graduatesByMonth('2026-11-01')).rejects.toThrow(/TESDA_API_KEY/);
+    await expect(new TesdaClient('https://tesda.test', { fetchFn: f.fetchFn }).centers()).rejects.toThrow(/TESDA_API_KEY/);
     expect(f.calls).toHaveLength(0);
+  });
+
+  it('pages through the students with nextOffset and sums them, keeping no row', async () => {
+    const row = (q: string, month = '2026-12') => ({ qualification: q, finishMonth: month, latitude: 14.7, longitude: 121, precision: 'city', barangay: 'X' });
+    const f = fake((url) => {
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      return offset === 0
+        ? { status: 200, body: { total: 5, hasMore: true, nextOffset: 3, items: [row('Cookery II'), row('cookery II'), row('Driving II')] } }
+        : { status: 200, body: { total: 5, hasMore: false, nextOffset: null, items: [row('Cookery II', '2027-01'), { qualification: 'Cookery II' }] } };
+    });
+    const r = await new TesdaClient('https://tesda.test', { apiKey: 'k', fetchFn: f.fetchFn, sleep: f.sleep }).upcomingGraduates();
+    expect(f.calls.map((c) => c.url)).toEqual([
+      'https://tesda.test/api/v1/students/all?limit=2000&offset=0',
+      'https://tesda.test/api/v1/students/all?limit=2000&offset=3',
+    ]);
+    expect(r.total).toBe(5);
+    expect(r.skipped).toBe(1);
+    expect(r.groups.map((g) => [g.qualification, g.month, g.graduates])).toEqual([
+      ['Cookery II', manilaMonthStart('2026-12'), 2],
+      ['Driving II', manilaMonthStart('2026-12'), 1],
+      ['Cookery II', manilaMonthStart('2027-01'), 1],
+    ]);
+    expect(Object.keys(r.groups[0]!).sort()).toEqual(['graduates', 'lat', 'lon', 'month', 'precision', 'qualification']);
   });
 });

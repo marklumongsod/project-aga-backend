@@ -1,6 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn, PrimaryGeneratedColumn } from 'typeorm';
 import type { Point } from 'geojson';
-import { City } from './geography.entity';
+import { City, Province } from './geography.entity';
 import { EPOCH_NOW_SQL, epochTransformer } from '../epoch';
 
 /** T2MIS qualification (QualId). */
@@ -148,34 +148,46 @@ export class CenterQualification {
   qualificationRef?: Qualification;
 }
 
-/** Graduates finishing training at a school in a month (Asia/Manila month start, epoch seconds). Counts only. */
-@Entity({ name: 'school_graduates' })
-export class SchoolGraduates {
-  @PrimaryColumn({ name: 'school_id', type: 'int' })
-  schoolId: number;
+/**
+ * Upcoming graduates (next 6 months, from the TESDA API's students list) of one qualification, finishing in one month,
+ * in one town, or in one province when the API doesn't know the town (`cityId` null). Counts only, never a student.
+ */
+@Entity({ name: 'upcoming_graduates' })
+export class UpcomingGraduates {
+  @PrimaryGeneratedColumn()
+  id: number;
 
-  @Index()
-  @PrimaryColumn({ type: 'bigint', transformer: epochTransformer })
-  month: number;
+  @Index('IDX_upcoming_graduates_province')
+  @Column({ name: 'province_psgc', type: 'char', length: 10 })
+  provincePsgc: string;
 
-  @Column({ name: 'school_name', type: 'varchar', nullable: true })
-  schoolName: string | null;
+  @ManyToOne(() => Province, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'province_psgc' })
+  province?: Province;
 
-  @Column({ name: 'province_name', type: 'varchar', nullable: true })
-  provinceName: string | null;
-
-  @Column({ type: 'double precision' })
-  lat: number;
-
-  @Column({ type: 'double precision' })
-  lon: number;
-
+  @Index('IDX_upcoming_graduates_city')
   @Column({ name: 'city_id', type: 'int', nullable: true })
   cityId: number | null;
 
   @ManyToOne(() => City, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'city_id' })
   city?: City;
+
+  /** as the TESDA API names it, e.g. "Cookery II" */
+  @Column()
+  qualification: string;
+
+  /** the T2MIS QualId when the name matches one (about 80% do) */
+  @Column({ name: 'qualification_id', type: 'int', nullable: true })
+  qualificationId: number | null;
+
+  @ManyToOne(() => Qualification, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'qualification_id' })
+  qualificationRef?: Qualification;
+
+  /** 00:00 Asia/Manila on the 1st of the finish month, epoch seconds */
+  @Column({ name: 'finish_month', type: 'bigint', transformer: epochTransformer })
+  finishMonth: number;
 
   @Column({ type: 'int' })
   graduates: number;

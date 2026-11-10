@@ -7,7 +7,7 @@ import { AreaLevel } from '../database/entities';
 import { AreaScopeService } from '../scope/area-scope.service';
 import { SimulationService } from '../simulation/simulation.service';
 import { RoutingService } from '../simulation/travel/routing.service';
-import { buildIsochrones } from './isochrone';
+import { routedIsochrones } from './isochrone';
 import { TRAVEL_TIME_MODEL, TravelTimeModel } from '../simulation/travel/travel-time.model';
 
 @Injectable()
@@ -155,29 +155,10 @@ export class CentersService {
     const hit = this.isoCache.get(key);
     if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
 
-    // Look as far as anything could be in the limit (search bound), with a grid whose spacing grows with the radius so
-    // the number of routed points stays about the same (~5,000) for any limit.
-    const radiusKm = Math.ceil(this.sim.searchKm(limitMinutes) * 1.05);
-    const spacingKm = Math.max(1.5, Math.round((radiusKm / 36) * 10) / 10);
-    const maxSnapM = spacingKm * 1000 * 1.2; // a point farther than this from a road is open sea, not "reachable"
-    let failed = false;
-    const built = await buildIsochrones(
-      { lon: c.lon, lat: c.lat },
-      { radiusKm, spacingKm, breaks: [limitMinutes / 3, (2 * limitMinutes) / 3, limitMinutes] },
-      async (pts) => {
-        const t = await this.routing.table(pts, [{ lon: c.lon, lat: c.lat }]);
-        if (!t) {
-          failed = true;
-          return pts.map(() => null);
-        }
-        return pts.map((_, i) => {
-          const snap = t.sourceSnapM?.[i] ?? 0;
-          const m = t.minutes[i]?.[0];
-          return m === null || m === undefined || snap > maxSnapM ? null : m;
-        });
-      },
-    );
-    if (failed) throw new ServiceUnavailableException('Isochrones are unavailable right now. Try again in a moment.');
+    // Look as far as anything could be in the limit (search bound), routed by road and ferry.
+    const iso = await routedIsochrones({ lon: c.lon, lat: c.lat }, limitMinutes, this.sim.searchKm(limitMinutes), (s, d) => this.routing.table(s, d));
+    if (!iso) throw new ServiceUnavailableException('Isochrones are unavailable right now. Try again in a moment.');
+    const { radiusKm, spacingKm, built } = iso;
 
     const value = {
       type: 'FeatureCollection' as const,
@@ -189,11 +170,9 @@ export class CentersService {
         travelModel: this.routing.label,
         gridPoints: built.points,
         reachedPoints: built.reached,
+        samples: built.samples,
       },
-      features: [
-        ...built.bands.map((b) => ({ ...b, properties: { kind: 'band', ...b.properties } })),
-        ...(built.limit ? [{ ...built.limit, properties: { kind: 'limit', toMinutes: limitMinutes } }] : []),
-      ],
+      features: iso.features,
     };
     this.isoCache.set(key, { at: Date.now(), value });
     return value;

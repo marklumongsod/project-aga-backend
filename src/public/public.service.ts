@@ -1,3 +1,4 @@
+import { DESERT_LEVELS } from '../common/rate-band';
 import {
   BadRequestException,
   Inject,
@@ -12,7 +13,7 @@ import { RoutingService } from '../simulation/travel/routing.service';
 import { TRAVEL_TIME_MODEL, TravelTimeModel } from '../simulation/travel/travel-time.model';
 import { haversineKm } from '../common/geo/haversine';
 import { toRouteSteps, WALK_MAX_M, WALK_MAX_ROUTE_KM, walkMinutes, walkSteps } from '../simulation/travel/route-instructions';
-import { NearestCentersDto, RouteDto, RouteResultDto } from './public.dto';
+import { NearestCentersDto, PublicStatsDto, RouteDto, RouteResultDto } from './public.dto';
 
 /** Centers farther than this are not useful to a learner and are not listed. */
 const SEARCH_RADIUS_KM = 150;
@@ -46,6 +47,16 @@ export class PublicService {
         ORDER BY (c.name ILIKE $2) DESC, c.name LIMIT 12`,
       [like(q), `${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`],
     );
+  }
+
+  /** Centers on the map and the qualifications they can assess (the same centers the finder searches). */
+  async stats(): Promise<PublicStatsDto> {
+    const [row] = await this.db.query(
+      `SELECT (SELECT count(*)::int FROM assessment_centers WHERE include_in_analysis) AS centers,
+              (SELECT count(DISTINCT ${LABEL('cq.qualification')})::int
+                 FROM center_qualifications cq JOIN assessment_centers c ON c.id = cq.center_id AND c.include_in_analysis) AS qualifications`,
+    );
+    return { centers: row.centers, qualifications: row.qualifications, desertLegend: DESERT_LEVELS };
   }
 
   /**

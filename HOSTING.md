@@ -15,7 +15,7 @@ What it takes to run Project AGA on a server instead of a laptop, what was teste
 | `db` | PostgreSQL 16 + PostGIS 3.4 | yes | about 0.3 GB, database about 0.14 GB |
 | `api` | NestJS API (`aga-api` image) | yes | about 60 MB idle (more while a simulation runs) |
 | `web` | nginx serving the built website and forwarding `/api` | yes | about 8 MB |
-| `osrm` | OSRM with the car profile | optional | 1.5 GB |
+| `osrm` | OSRM, car profile at Philippine speed limits | optional | 1.5 GB |
 | `osrm-foot` | OSRM with the foot profile | optional | 1.4 GB |
 
 Routing is optional. Without it `TRAVEL_MODEL=estimate` still works, and with a precomputed matrix (`npm run travel:build`, stored in the database) the simulation needs no routing server at all. The routing servers are only used live for the finder's exact times, directions, a center's drive-time area and the what-if pin; if they are down those fall back to the stored matrix or the estimate and the API keeps answering.

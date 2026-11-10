@@ -151,7 +151,7 @@ All parameters are optional. Omit them to get the user's home area. `level` is `
               "estimatedCandidates": 1135, "nearestMinutes": null, "rank": 1 } ],
   "rows": [ /* every child area, same shape, worst first */ ],
   "deserts": { "cities": 5, "candidates": 5675,
-               "byLevel": [ { "level": 4, "label": "Level 4: more than 60 candidates", "cities": 5, "candidates": 5675 } ] },
+               "byLevel": [ { "level": 4, "label": "Level 4: 601 candidates and up", "cities": 5, "candidates": 5675 } ] },
   "desertLegend": [ { "band": 0, "label": "Not an assessment desert", "color": "#e6e9f0" }, … ],
   "densityLegend": [ { "band": 0, "label": "…", "color": "#…" }, … ]
 }

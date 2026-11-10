@@ -279,6 +279,28 @@ describe('Project AGA API (e2e)', () => {
       expect(await mine('po')).toHaveLength(0);
     });
 
+    it('gets a report number in save order, never reused', async () => {
+      const a = await post('po', SIPALAY).expect(201);
+      const b = await post('po', SIPALAY).expect(201);
+      expect(b.body.reportNo).toBe(a.body.reportNo + 1);
+      expect((await mine('po')).map((p) => (p as unknown as { reportNo: number }).reportNo)).toEqual([b.body.reportNo, a.body.reportNo]);
+      await api().delete(`/api/v1/proposals/${b.body.id}`).set(as('po')).expect(204);
+      const c = await post('po', SIPALAY).expect(201);
+      expect(c.body.reportNo).toBeGreaterThan(b.body.reportNo);
+    });
+
+    it('can be renamed by its author or by Central Office, not by someone who can only see it', async () => {
+      const a = await post('po', SIPALAY).expect(201);
+      const renamed = await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('po')).send({ name: `  ${TAG}  ` }).expect(200);
+      expect(renamed.body.name).toBe(TAG); // trimmed
+      await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('ro')).send({ name: TAG }).expect(403);
+      await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('co')).send({ name: TAG }).expect(200);
+      await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('po')).send({ name: '' }).expect(400);
+      await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('po')).send({ name: TAG, lat: 1 }).expect(400); // only the name
+      const other = await post('co', CEBU).expect(201);
+      await api().patch(`/api/v1/proposals/${other.body.id}`).set(as('po')).send({ name: TAG }).expect(404); // can't see it
+    });
+
     it('needs a sign-in, and a real id', async () => {
       await api().get('/api/v1/proposals').expect(401);
       await api().post('/api/v1/proposals').send(SIPALAY).expect(401);
@@ -458,6 +480,48 @@ describe('Project AGA API (e2e)', () => {
           expect(r.body.features[0].properties).not.toHaveProperty('band');
         }));
 
+    describe('qualification filter (?qualification=)', () => {
+      const pick = async () => {
+        const list = await api().get('/api/v1/dashboard/qualifications').set(as('co')).expect(200);
+        expect(list.body.length).toBeGreaterThan(0);
+        expect(Object.keys(list.body[0]).sort()).toEqual(['centers', 'key', 'name']);
+        return list.body.sort((a: { centers: number }, b: { centers: number }) => b.centers - a.centers)[0] as { key: string; name: string; centers: number };
+      };
+
+      it('needs a sign-in to list qualifications', () => api().get('/api/v1/dashboard/qualifications').expect(401));
+
+      it('counts only that qualification and the centers accredited for it, and never enters the history', async () => {
+        const q = await pick();
+        const all = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
+        const ov = await api().get(`/api/v1/dashboard/overview?qualification=${encodeURIComponent(q.key)}`).set(as('co')).expect(200);
+        expect(ov.body.area.centers).toBe(q.centers);
+        expect(ov.body.area.candidates).toBeGreaterThan(0);
+        expect(ov.body.area.candidates).toBeLessThan(all.body.area.candidates);
+        expect(ov.body.run.assumptions.candidates).toContain(q.name);
+        const after = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
+        expect(after.body.run.id).toBe(all.body.run.id);
+      });
+
+      it('works with a custom limit, and recommendations follow it', async () => {
+        const q = await pick();
+        const k = encodeURIComponent(q.key);
+        const longer = await api().get(`/api/v1/dashboard/overview?qualification=${k}&limitMinutes=180`).set(as('co')).expect(200);
+        const shorter = await api().get(`/api/v1/dashboard/overview?qualification=${k}&limitMinutes=30`).set(as('co')).expect(200);
+        expect(shorter.body.area.flagged).toBeGreaterThanOrEqual(longer.body.area.flagged);
+        const reco = await api().get(`/api/v1/simulation/recommendations?level=REGION&code=0600000000&qualification=${k}`).set(as('co')).expect(200);
+        const region = await api().get(`/api/v1/dashboard/overview?level=REGION&code=0600000000&qualification=${k}`).set(as('co')).expect(200);
+        expect(reco.body.desertCandidates).toBe(region.body.deserts.candidates);
+      });
+
+      it('keeps role scope', async () => {
+        const q = await pick();
+        await api().get(`/api/v1/dashboard/overview?level=NATIONAL&qualification=${encodeURIComponent(q.key)}`).set(as('ro')).expect(403);
+        await api().get(`/api/v1/dashboard/overview?level=REGION&code=0600000000&qualification=${encodeURIComponent(q.key)}`).set(as('po')).expect(403);
+      });
+
+      it('rejects an unknown qualification', () => api().get('/api/v1/dashboard/overview?qualification=not-a-real-one').set(as('co')).expect(400));
+    });
+
     describe('assessment deserts and density (team doc)', () => {
       it('lists assessment deserts by level, consistent with the cities in them', async () => {
         const ov = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
@@ -468,7 +532,7 @@ describe('Project AGA API (e2e)', () => {
         expect(d.cities).toBeGreaterThan(0); // the seeded country has islands no center can reach
         expect(ov.body.area.desertCities).toBe(d.cities);
         expect(ov.body.desertLegend.map((l: { band: number }) => l.band)).toEqual([0, 1, 2, 3, 4]);
-        expect(ov.body.desertLegend[4].label).toContain('more than 60');
+        expect(ov.body.desertLegend[4].label).toContain('601 candidates and up');
       });
 
       it('a province lists its own desert cities with levels that follow the candidate counts', async () => {
@@ -482,7 +546,7 @@ describe('Project AGA API (e2e)', () => {
         const deserts = ov.body.rows.filter((r: { desertLevel: number }) => r.desertLevel > 0);
         expect(deserts.length).toBe(ov.body.deserts.cities);
         for (const c of deserts) {
-          const lvl = c.candidates <= 20 ? 1 : c.candidates <= 40 ? 2 : c.candidates <= 60 ? 3 : 4;
+          const lvl = c.candidates <= 200 ? 1 : c.candidates <= 400 ? 2 : c.candidates <= 600 ? 3 : 4;
           expect(c.desertLevel).toBe(lvl);
           expect(c.nearestMinutes).toBeNull(); // no center within the travel range
         }
@@ -666,6 +730,102 @@ describe('Project AGA API (e2e)', () => {
       expect(r.body.placeAreas[1].desertCitiesAfter).toBeLessThan(r.body.placeAreas[1].desertCitiesBefore);
     });
 
+    it('lists the desert cities of an area with their shapes, matching the desert summary, inside the scope', async () => {
+      const ov = await api().get(`/api/v1/dashboard/overview?level=REGION&code=${R6}`).set(as('ro')).expect(200);
+      const d = await api().get(`/api/v1/dashboard/deserts?level=REGION&code=${R6}`).set(as('ro')).expect(200);
+      expect(d.body.type).toBe('FeatureCollection');
+      expect(d.body.features.length).toBe(ov.body.deserts.cities);
+      for (const f of d.body.features) {
+        expect(f.properties.desertLevel).toBeGreaterThan(0);
+        expect(['Polygon', 'MultiPolygon']).toContain(f.geometry.type);
+      }
+      const nat = await api().get('/api/v1/dashboard/deserts').set(as('co')).expect(200);
+      const natOv = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
+      expect(nat.body.features.length).toBe(natOv.body.deserts.cities);
+      await api().get('/api/v1/dashboard/deserts?level=REGION&code=0700000000').set(as('ro')).expect(403);
+      await api().get('/api/v1/dashboard/deserts?level=PROVINCE&code=0702200000').set(as('po')).expect(403);
+    });
+
+    it('spreads every city of an area over heat points whose shares add up to the area, inside the scope', async () => {
+      const ov = await api().get(`/api/v1/dashboard/overview?level=REGION&code=${R6}`).set(as('ro')).expect(200);
+      const h = await api().get(`/api/v1/dashboard/heat?level=REGION&code=${R6}`).set(as('ro')).expect(200);
+      expect(h.body.type).toBe('FeatureCollection');
+      expect(h.body.features.length).toBeGreaterThan(0);
+      for (const f of h.body.features) {
+        expect(f.geometry.type).toBe('Point');
+        expect(Object.keys(f.properties).sort()).toEqual(['candidates', 'code', 'flagged']);
+        expect(f.properties.candidates).toBeGreaterThan(0);
+      }
+      const sum = (k: 'candidates' | 'flagged') => h.body.features.reduce((n: number, f: { properties: Record<string, number> }) => n + f.properties[k], 0);
+      const cities = new Set(h.body.features.map((f: { properties: { code: string } }) => f.properties.code)).size;
+      expect(h.body.features.length).toBeGreaterThan(cities); // spread over the town, not one point per town
+      expect(Math.abs(sum('flagged') - ov.body.area.flagged)).toBeLessThan(0.01);
+      expect(Math.abs(sum('candidates') - ov.body.area.candidates)).toBeLessThanOrEqual(cities); // per-city rounding
+      const again = await api().get(`/api/v1/dashboard/heat?level=REGION&code=${R6}`).set(as('ro')).expect(200);
+      expect(again.body.features).toEqual(h.body.features); // seeded: the same points every time
+      await api().get('/api/v1/dashboard/heat').expect(401);
+      await api().get('/api/v1/dashboard/heat?level=REGION&code=0700000000').set(as('ro')).expect(403);
+      await api().get('/api/v1/dashboard/heat?level=PROVINCE&code=0702200000').set(as('po')).expect(403);
+    });
+
+    it("puts Quezon City's candidates in Quezon City, not in the town of Quezon in Quezon province", async () => {
+      // "Quezon City" once matched Quezon province by name, piling the city's 33,956 candidates on one small town
+      const ov = await api().get('/api/v1/dashboard/overview?level=PROVINCE&code=0405600000').set(as('co')).expect(200);
+      const town = ov.body.rows.find((r: { code: string }) => r.code === '0405637000');
+      expect(town.candidates).toBeLessThan(ov.body.area.candidates / 2);
+      expect(ov.body.rows.filter((r: { candidates: number }) => r.candidates > 0).length).toBeGreaterThan(1);
+    });
+
+    describe("a proposed center's reach (the planner's green area)", () => {
+      const reach = (who: 'co' | 'ro' | 'po', q: string) => api().get(`/api/v1/simulation/reach?${q}`).set(as(who));
+      const SIPALAY = 'lat=9.752&lon=122.405';
+
+      it('lists the cities within the travel limit, and agrees with the what-if', async () => {
+        const r = await reach('po', SIPALAY).expect(200);
+        expect(r.body.type).toBe('FeatureCollection');
+        expect(r.body.properties.limitMinutes).toBe(90);
+        expect(r.body.features.length).toBeGreaterThan(0);
+        expect(r.body.properties.citiesWithinLimit).toBe(r.body.features.length);
+        for (const f of r.body.features) {
+          expect(f.properties.withinLimit).toBe(true);
+          expect(f.properties.minutes).toBeLessThanOrEqual(90);
+          expect(['Polygon', 'MultiPolygon']).toContain(f.geometry.type);
+        }
+        const keys = new Set(r.body.features.map((f: { properties: { key: string } }) => f.properties.key));
+        const wi = await api().post('/api/v1/simulation/what-if').set(as('po')).send({ lat: 9.752, lon: 122.405 }).expect(200);
+        expect(keys.has(wi.body.pin.cityKey)).toBe(true); // the pin's own city
+        for (const c of wi.body.improvedCities) expect(keys.has(c.key)).toBe(true); // every city the what-if says it helps is shaded
+      });
+
+      it('follows the travel limit', async () => {
+        const wide = await reach('co', SIPALAY).expect(200);
+        const short = await reach('co', `${SIPALAY}&limitMinutes=30`).expect(200);
+        expect(short.body.properties.limitMinutes).toBe(30);
+        expect(short.body.features.length).toBeLessThanOrEqual(wide.body.features.length);
+        for (const f of short.body.features) expect(f.properties.minutes).toBeLessThanOrEqual(30);
+      });
+
+      it('keeps to the office scope like the what-if', async () => {
+        await reach('ro', `${SIPALAY}&level=PROVINCE&code=0702200000`).expect(403); // Cebu is outside Region VI
+        await reach('po', 'lat=10.3157&lon=123.8854').expect(400); // a pin in Cebu City, outside the PO's province
+        await api().get(`/api/v1/simulation/reach?${SIPALAY}`).expect(401);
+      });
+
+      it('draws true drive-time areas around the pin, in thirds of the limit, inside the scope', async () => {
+        const iso = (who: 'co' | 'ro' | 'po', q: string) => api().get(`/api/v1/simulation/isochrone?${q}`).set(as(who));
+        const r = await iso('po', `${SIPALAY}&limitMinutes=60`);
+        if (r.status === 503) return; // no routing server in this environment: nothing to draw
+        expect(r.status).toBe(200);
+        expect(r.body.properties.minutes).toEqual([20, 40, 60]);
+        const bands = r.body.features.filter((f: { properties: { kind: string } }) => f.properties.kind === 'band');
+        expect(bands.length).toBeGreaterThan(0);
+        for (const f of r.body.features) expect(['Polygon', 'MultiPolygon']).toContain(f.geometry.type);
+        await iso('ro', `${SIPALAY}&level=PROVINCE&code=0702200000`).expect(403);
+        await iso('po', 'lat=10.3157&lon=123.8854').expect(400);
+        await api().get(`/api/v1/simulation/isochrone?${SIPALAY}`).expect(401);
+      });
+    });
+
     describe('snapping a hand-placed pin to the nearest road', () => {
       const snap = (who: 'co' | 'ro' | 'po', q: string) => api().get(`/api/v1/simulation/snap?${q}`).set(as(who));
 
@@ -740,7 +900,7 @@ describe('Project AGA API (e2e)', () => {
       it('says which qualifications each site should offer, from the graduates of the provinces it serves', async () => {
         const r = await get('co', `?level=PROVINCE&code=${NEGROS_OCC}&count=3`).expect(200);
         expect(r.body.qualificationSource).toContain('graduate');
-        const sites = r.body.sites as Array<{ topQualifications: Array<{ qualification: string; qualificationId: number; estimatedCandidates: number; share: number; centersOffering: number }>; newlyServed: number }>;
+        const sites = r.body.sites as Array<{ topQualifications: Array<{ qualification: string; qualificationId: number | null; estimatedCandidates: number; share: number; centersOffering: number }>; newlyServed: number }>;
         expect(sites.length).toBeGreaterThan(0);
         for (const site of sites) {
           expect(site.topQualifications.length).toBeGreaterThan(0);
@@ -748,7 +908,7 @@ describe('Project AGA API (e2e)', () => {
           const est = site.topQualifications.map((q) => q.estimatedCandidates);
           expect(est).toEqual([...est].sort((x, y) => y - x)); // most wanted first
           for (const q of site.topQualifications) {
-            expect(Number.isInteger(q.qualificationId)).toBe(true);
+            expect(q.qualificationId === null || Number.isInteger(q.qualificationId)).toBe(true);
             expect(q.share).toBeGreaterThan(0);
             expect(q.share).toBeLessThanOrEqual(1);
             expect(q.estimatedCandidates).toBeLessThanOrEqual(site.newlyServed); // no more wanted than the candidates served
@@ -757,10 +917,10 @@ describe('Project AGA API (e2e)', () => {
         }
       });
 
-      it('has no learner data in the qualification figures: only counts per province', async () => {
-        const rows: Array<Record<string, unknown>> = await app.get(DataSource).query(`SELECT * FROM province_qualification_graduates LIMIT 50`);
+      it('has no learner data in the graduate figures: only counts per town or province, qualification and month', async () => {
+        const rows: Array<Record<string, unknown>> = await app.get(DataSource).query(`SELECT * FROM upcoming_graduates LIMIT 50`);
         expect(rows.length).toBeGreaterThan(0);
-        expect(Object.keys(rows[0]!).sort()).toEqual(['graduates', 'province_psgc', 'qualification', 'qualification_id']);
+        expect(Object.keys(rows[0]!).sort()).toEqual(['city_id', 'finish_month', 'graduates', 'id', 'province_psgc', 'qualification', 'qualification_id']);
       });
 
       it('looks only inside a chosen province, and keeps role scope', async () => {
@@ -830,6 +990,17 @@ describe('Project AGA API (e2e)', () => {
   });
 
   describe('public learner finder (no sign-in)', () => {
+    it('gives the headline counts (centers and qualifications) and the desert legend, nothing about candidates', () =>
+      api()
+        .get('/api/v1/public/stats')
+        .expect(200)
+        .expect((r) => {
+          expect(Object.keys(r.body).sort()).toEqual(['centers', 'desertLegend', 'qualifications']);
+          expect(r.body.desertLegend.map((l: { band: number }) => l.band)).toEqual([0, 1, 2, 3, 4]);
+          expect(r.body.centers).toBeGreaterThan(0);
+          expect(r.body.qualifications).toBeGreaterThan(0);
+        }));
+
     it('searches places', () =>
       api()
         .get('/api/v1/public/places?q=Malolos')

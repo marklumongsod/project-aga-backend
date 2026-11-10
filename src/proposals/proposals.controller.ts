@@ -1,8 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Patch } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuthUser, CurrentUser } from '../common/auth.decorators';
 import { WhatIfDto } from '../simulation/simulation.dto';
-import { ProposalDto, ProposalSummaryDto } from './proposals.dto';
+import { ProposalDto, ProposalSummaryDto, RenameProposalDto } from './proposals.dto';
 import { ProposalsService } from './proposals.service';
 
 /** Saved what-ifs for a proposed center. Scoped like the what-if: you see your own and those in your area. */
@@ -28,6 +28,12 @@ export class ProposalsController {
   @Get(':id')
   get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string): Promise<ProposalDto> {
     return this.proposals.get(user, id);
+  }
+
+  /** Rename a proposal (its report name): the author or Central Office. */
+  @Patch(':id')
+  rename(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RenameProposalDto): Promise<ProposalSummaryDto> {
+    return this.proposals.rename(user, id, dto);
   }
 
   @Delete(':id')

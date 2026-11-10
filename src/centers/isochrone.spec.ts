@@ -32,6 +32,17 @@ describe('buildIsochrones', () => {
     expect(booleanPointInPolygon(far, r.limit!)).toBe(false);
   });
 
+  it('returns the timed points within the limit for the smooth reach field, and none at sea', async () => {
+    const sea = async (pts: Pt[]) => pts.map((p) => (p.lon > center.lon ? null : haversineKm(center.lat, center.lon, p.lat, p.lon) * 1.5));
+    const r = await buildIsochrones(center, opts, sea);
+    expect(r.samples.length).toBeGreaterThan(100);
+    for (const [lon, lat, m] of r.samples) {
+      expect(m).toBeLessThanOrEqual(90);
+      expect(lon).toBeLessThanOrEqual(center.lon); // the eastern half is sea
+      expect(Math.abs(m - haversineKm(center.lat, center.lon, lat, lon) * 1.5)).toBeLessThan(0.2); // its own routed minutes
+    }
+  });
+
   it('leaves out unreachable points (the sea): a half-plane of water shrinks the area to about half', async () => {
     const sea = async (pts: Pt[]) => pts.map((p) => (p.lon > center.lon ? null : haversineKm(center.lat, center.lon, p.lat, p.lon) * 1.5));
     const full = await buildIsochrones(center, opts, flat);

@@ -31,7 +31,6 @@
     "tesda:sync:prod": "node dist/cli/sync-tesda.js",
     "travel:build:prod": "node dist/cli/build-travel-matrix.js",
     "qa:travel": "ts-node --transpile-only src/cli/travel-spotcheck.ts",
-    "data:qualifications": "ts-node --transpile-only src/cli/load-qualification-demand.ts",
     "data:quality": "ts-node --transpile-only src/cli/data-quality.ts",
     "data:quality:prod": "node dist/cli/data-quality.js"
   },
@@ -55,6 +54,7 @@
     "bcryptjs": "3.0.3",
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
+    "compression": "1.8.1",
     "cron": "^4.4.0",
     "dotenv": "^16.6.1",
     "helmet": "8.3.0",
@@ -73,6 +73,7 @@
     "@nestjs/testing": "11.2.7",
     "@turf/area": "^7.4.0",
     "@turf/boolean-point-in-polygon": "^7.4.0",
+    "@types/compression": "1.8.1",
     "@types/express": "5.0.6",
     "@types/geojson": "^7946.0.16",
     "@types/jest": "29.5.14",
