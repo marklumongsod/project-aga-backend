@@ -900,7 +900,7 @@ describe('Project AGA API (e2e)', () => {
       it('says which qualifications each site should offer, from the graduates of the provinces it serves', async () => {
         const r = await get('co', `?level=PROVINCE&code=${NEGROS_OCC}&count=3`).expect(200);
         expect(r.body.qualificationSource).toContain('graduate');
-        const sites = r.body.sites as Array<{ topQualifications: Array<{ qualification: string; qualificationId: number | null; estimatedCandidates: number; share: number; centersOffering: number }>; newlyServed: number }>;
+        const sites = r.body.sites as Array<{ topQualifications: Array<{ qualification: string; estimatedCandidates: number; share: number; centersOffering: number }>; newlyServed: number }>;
         expect(sites.length).toBeGreaterThan(0);
         for (const site of sites) {
           expect(site.topQualifications.length).toBeGreaterThan(0);
@@ -908,7 +908,7 @@ describe('Project AGA API (e2e)', () => {
           const est = site.topQualifications.map((q) => q.estimatedCandidates);
           expect(est).toEqual([...est].sort((x, y) => y - x)); // most wanted first
           for (const q of site.topQualifications) {
-            expect(q.qualificationId === null || Number.isInteger(q.qualificationId)).toBe(true);
+            expect(q).not.toHaveProperty('qualificationId');
             expect(q.share).toBeGreaterThan(0);
             expect(q.share).toBeLessThanOrEqual(1);
             expect(q.estimatedCandidates).toBeLessThanOrEqual(site.newlyServed); // no more wanted than the candidates served
@@ -920,7 +920,7 @@ describe('Project AGA API (e2e)', () => {
       it('has no learner data in the graduate figures: only counts per town or province, qualification and month', async () => {
         const rows: Array<Record<string, unknown>> = await app.get(DataSource).query(`SELECT * FROM upcoming_graduates LIMIT 50`);
         expect(rows.length).toBeGreaterThan(0);
-        expect(Object.keys(rows[0]!).sort()).toEqual(['city_id', 'finish_month', 'graduates', 'id', 'province_psgc', 'qualification', 'qualification_id']);
+        expect(Object.keys(rows[0]!).sort()).toEqual(['city_id', 'finish_month', 'graduates', 'id', 'province_psgc', 'qualification']);
       });
 
       it('looks only inside a chosen province, and keeps role scope', async () => {
@@ -1007,11 +1007,17 @@ describe('Project AGA API (e2e)', () => {
         .expect(200)
         .expect((r) => expect(r.body[0].name).toContain('Malolos')));
 
-    it('lists qualifications offered by centers', () =>
+    it('lists qualifications offered by centers, by their TESDA API name only', () =>
       api()
         .get('/api/v1/public/qualifications?q=cookery')
         .expect(200)
-        .expect((r) => expect(r.body.length).toBeGreaterThan(0)));
+        .expect((r) => {
+          expect(r.body.length).toBeGreaterThan(0);
+          for (const q of r.body) {
+            expect(Object.keys(q).sort()).toEqual(['centers', 'label', 'levelId', 'title']);
+            expect(q.label.toLowerCase()).toContain('cookery');
+          }
+        }));
 
     it('finds the nearest centers from a location, without congestion or learner data', () =>
       api()
@@ -1038,17 +1044,18 @@ describe('Project AGA API (e2e)', () => {
       expect(walk.body.minutes).toBe(first.minutes);
     });
 
-    it('filters by a TESDA qualification label, including one with no T2MIS QualId', async () => {
+    it('filters by a TESDA qualification label, and no longer takes a T2MIS qualificationId', async () => {
       const quals = await api().get('/api/v1/public/qualifications').expect(200);
       expect(quals.body[0].label).toMatch(/ NC (I|II|III|IV)$|[^I]$/);
-      const unmatched = quals.body.find((q: { id: number | null }) => q.id === null);
-      expect(unmatched).toBeDefined();
+      const pick = quals.body[quals.body.length - 1];
       const r = await api()
-        .get(`/api/v1/public/centers/nearest?lat=14.5995&lon=120.9842&limit=20&qualification=${encodeURIComponent(unmatched.label)}`)
+        .get(`/api/v1/public/centers/nearest?lat=14.5995&lon=120.9842&limit=20&qualification=${encodeURIComponent(pick.label)}`)
         .expect(200);
-      expect(r.body.filters.qualification).toBe(unmatched.label);
-      for (const c of r.body.results) expect(c.qualifications).toContain(unmatched.label);
+      expect(r.body.filters.qualification).toBe(pick.label);
+      expect(r.body.filters).not.toHaveProperty('qualificationId');
+      for (const c of r.body.results) expect(c.qualifications).toContain(pick.label);
       expect(r.body.programData.centersWithProgramData).toBeGreaterThan(0);
+      await api().get('/api/v1/public/centers/nearest?lat=14.5995&lon=120.9842&qualificationId=1').expect(400);
     });
 
     it('lists only centers the TESDA API lists', async () => {

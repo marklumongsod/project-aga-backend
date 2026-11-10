@@ -41,7 +41,6 @@ export interface QualificationDemand {
   key: string;
   /** the name most graduates are listed under */
   name: string;
-  ids: Set<number>;
   towns: Map<string, number>;
   provinces: Map<string, number>;
 }
@@ -58,10 +57,10 @@ export class DemandService {
   /** Upcoming graduates per qualification (matched by name, so "Driving II" and "DRIVING NC II" are one), counts only. */
   async qualificationCatalog(): Promise<QualificationCatalog> {
     const cities: CityRow[] = await this.db.query(`SELECT key, province_psgc, region_psgc, lat, lon, island_id FROM cities ORDER BY key`);
-    const rows: Array<{ province_psgc: string; city_key: string | null; qualification: string; qualification_id: number | null; graduates: number }> = await this.db.query(
-      `SELECT g.province_psgc, c.key AS city_key, g.qualification, g.qualification_id, sum(g.graduates)::int AS graduates
+    const rows: Array<{ province_psgc: string; city_key: string | null; qualification: string; graduates: number }> = await this.db.query(
+      `SELECT g.province_psgc, c.key AS city_key, g.qualification, sum(g.graduates)::int AS graduates
          FROM upcoming_graduates g LEFT JOIN cities c ON c.id = g.city_id
-        GROUP BY 1, 2, 3, 4`,
+        GROUP BY 1, 2, 3`,
     );
     const byKey = new Map<string, QualificationDemand>();
     const nameCount = new Map<string, Map<string, number>>();
@@ -69,8 +68,7 @@ export class DemandService {
       const key = qualificationKey(r.qualification);
       if (!key) continue;
       let q = byKey.get(key);
-      if (!q) byKey.set(key, (q = { key, name: r.qualification, ids: new Set(), towns: new Map(), provinces: new Map() }));
-      if (r.qualification_id !== null) q.ids.add(r.qualification_id);
+      if (!q) byKey.set(key, (q = { key, name: r.qualification, towns: new Map(), provinces: new Map() }));
       if (r.city_key) q.towns.set(r.city_key, (q.towns.get(r.city_key) ?? 0) + r.graduates);
       else q.provinces.set(r.province_psgc, (q.provinces.get(r.province_psgc) ?? 0) + r.graduates);
       const names = nameCount.get(key) ?? new Map<string, number>();

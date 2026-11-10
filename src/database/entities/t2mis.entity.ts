@@ -3,29 +3,6 @@ import type { Point } from 'geojson';
 import { City, Province } from './geography.entity';
 import { EPOCH_NOW_SQL, epochTransformer } from '../epoch';
 
-/** T2MIS qualification (QualId). */
-@Entity({ name: 'qualifications' })
-export class Qualification {
-  @PrimaryColumn({ type: 'int' })
-  id: number;
-
-  @Column({ name: 'sector_id', type: 'int', nullable: true })
-  sectorId: number | null;
-
-  @Index()
-  @Column()
-  title: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  code: string | null;
-
-  @Column({ name: 'level_id', type: 'int', nullable: true })
-  levelId: number | null;
-
-  @Column({ default: true })
-  enabled: boolean;
-}
-
 /** T2MIS assessment center (CenterId) with Team C's validated geocode. */
 @Entity({ name: 'assessment_centers' })
 export class AssessmentCenter {
@@ -131,21 +108,12 @@ export class CenterQualification {
   @PrimaryColumn()
   qualification: string;
 
-  /** the T2MIS QualId whose title + level matches the name, if any */
-  @Index()
-  @Column({ name: 'qualification_id', type: 'int', nullable: true })
-  qualificationId: number | null;
-
   @Column({ name: 'accredited_until', type: 'bigint', nullable: true, transformer: epochTransformer })
   accreditedUntil: number | null;
 
   @ManyToOne(() => AssessmentCenter, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'center_id' })
   center?: AssessmentCenter;
-
-  @ManyToOne(() => Qualification, { onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'qualification_id' })
-  qualificationRef?: Qualification;
 }
 
 /**
@@ -176,14 +144,6 @@ export class UpcomingGraduates {
   /** as the TESDA API names it, e.g. "Cookery II" */
   @Column()
   qualification: string;
-
-  /** the T2MIS QualId when the name matches one (about 80% do) */
-  @Column({ name: 'qualification_id', type: 'int', nullable: true })
-  qualificationId: number | null;
-
-  @ManyToOne(() => Qualification, { onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'qualification_id' })
-  qualificationRef?: Qualification;
 
   /** 00:00 Asia/Manila on the 1st of the finish month, epoch seconds */
   @Column({ name: 'finish_month', type: 'bigint', transformer: epochTransformer })

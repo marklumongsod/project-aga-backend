@@ -195,14 +195,7 @@ def clean(v):
     return None if v in (None, 'NULL', '') else v
 
 
-quals = []
-for r in sheet('T2MIS Qualifications'):
-    q = num(r['QualId'])
-    if q is None:
-        continue
-    quals.append(dict(id=q, sectorId=num(r['SectorId']), title=str(r['QualificationTitle']).strip(), code=clean(r['QualificationCode']),
-                      levelId=num(r['LevelId']), enabled=str(r['Enable']) in ('1', '1.0', 'True')))
-dump('qualifications.json', quals)
+# Qualifications come from the TESDA API (npm run tesda:sync), by name; the T2MIS Qualifications sheet is not used.
 
 xl_centers = {num(r['CenterId']): r for r in sheet('T2MIS Assessment Centers') if num(r['CenterId']) is not None}
 gj = json.load(open(os.path.join(RAW, 'assessment_center_points.geojson')))['features']
@@ -228,8 +221,12 @@ for f in gj:
         islandId=island_of(pt) if ph else None,
         createdAt=epoch(xl.get('DateCreated')),
     ))
-dump('centers.json', centers)
-print(f"  centers in analysis: {sum(c['includeInAnalysis'] for c in centers)} of {len(centers)}", file=sys.stderr)
+# The centers themselves come from the TESDA API (npm run tesda:sync). Only Team C's hand-corrected positions are seeded:
+# the sync keeps them over the API's raw point.
+CORRECTED = {'geocode_override', 'water_fixed_geocode'}
+corrections = [c for c in centers if c['coordStatus'] in CORRECTED]
+dump('center_corrections.json', corrections)
+print(f"  corrected center positions: {len(corrections)} of {len(centers)} centers", file=sys.stderr)
 
 # ---------------------------------------------------------------- BSRS
 print('bsrs', file=sys.stderr)

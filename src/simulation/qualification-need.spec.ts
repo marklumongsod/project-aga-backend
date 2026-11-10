@@ -1,10 +1,10 @@
 import { DemandRow, estimateQualificationNeed, qualificationKey } from './qualification-need';
 
-const d = (provincePsgc: string, qualificationId: number | null, qualification: string, graduates: number): DemandRow => ({ provincePsgc, qualificationId, qualification, graduates });
+const d = (provincePsgc: string, qualification: string, graduates: number): DemandRow => ({ provincePsgc, qualification, graduates });
 const none = () => 0;
 
 describe('qualificationKey', () => {
-  it('treats the T2MIS title and the TESDA label as the same qualification', () => {
+  it('treats "NC" spellings and case as the same qualification', () => {
     expect(qualificationKey('DRIVING NC II')).toBe('driving ii');
     expect(qualificationKey('Driving II')).toBe('driving ii');
     expect(qualificationKey('Shielded Metal Arc Welding (SMAW) II')).toBe(qualificationKey('SHIELDED METAL ARC WELDING (SMAW) NC II'));
@@ -12,7 +12,7 @@ describe('qualificationKey', () => {
 });
 
 describe('estimateQualificationNeed', () => {
-  const demand = [d('P1', 1, 'Driving II', 600), d('P1', 2, 'Cookery II', 300), d('P1', 3, 'Welding II', 100), d('P2', 2, 'Cookery II', 50), d('P2', 4, 'Caregiving II', 150)];
+  const demand = [d('P1', 'Driving II', 600), d('P1', 'Cookery II', 300), d('P1', 'Welding II', 100), d('P2', 'Cookery II', 50), d('P2', 'Caregiving II', 150)];
 
   it('splits the candidates served over the province mix and ranks the biggest first', () => {
     const r = estimateQualificationNeed([{ provincePsgc: 'P1', count: 1000 }], demand, none);
@@ -39,24 +39,24 @@ describe('estimateQualificationNeed', () => {
   });
 
   it('reports how many centers already offer each, asking for the provinces served', () => {
-    const asked: Array<[string[], number | null]> = [];
-    const r = estimateQualificationNeed([{ provincePsgc: 'P1', count: 10 }, { provincePsgc: 'P2', count: 10 }], demand, (provs, qid) => {
-      asked.push([[...provs].sort(), qid]);
-      return qid === 1 ? 0 : 4;
+    const asked: Array<[string[], string]> = [];
+    const r = estimateQualificationNeed([{ provincePsgc: 'P1', count: 10 }, { provincePsgc: 'P2', count: 10 }], demand, (provs, name) => {
+      asked.push([[...provs].sort(), name]);
+      return name === 'Driving II' ? 0 : 4;
     });
     expect(asked[0]![0]).toEqual(['P1', 'P2']);
-    expect(Object.fromEntries(r.map((x) => [x.qualificationId, x.centersOffering]))[1]).toBe(0);
+    expect(Object.fromEntries(r.map((x) => [x.qualification, x.centersOffering]))['Driving II']).toBe(0);
   });
 
-  it('matches by name, so a qualification with no T2MIS id still counts once', () => {
-    const rows = [d('P1', null, 'Barista II', 30), d('P1', null, 'BARISTA NC II', 30), d('P1', 7, 'Cookery II', 40)];
+  it('matches by name, so two spellings of one qualification count once', () => {
+    const rows = [d('P1', 'Barista II', 30), d('P1', 'BARISTA NC II', 30), d('P1', 'Cookery II', 40)];
     const r = estimateQualificationNeed([{ provincePsgc: 'P1', count: 100 }], rows, none);
-    expect(r.map((x) => [x.qualification, x.qualificationId, x.estimatedCandidates])).toEqual([['Barista II', null, 60], ['Cookery II', 7, 40]]);
+    expect(r.map((x) => [x.qualification, x.estimatedCandidates])).toEqual([['Barista II', 60], ['Cookery II', 40]]);
   });
 
   it('breaks a tie by the one fewer centers offer', () => {
-    const tie = [d('P', 1, 'A II', 100), d('P', 2, 'B II', 100)];
-    const r = estimateQualificationNeed([{ provincePsgc: 'P', count: 10 }], tie, (_p, qid) => (qid === 1 ? 5 : 1));
-    expect(r.map((x) => x.qualificationId)).toEqual([2, 1]);
+    const tie = [d('P', 'A II', 100), d('P', 'B II', 100)];
+    const r = estimateQualificationNeed([{ provincePsgc: 'P', count: 10 }], tie, (_p, name) => (name === 'A II' ? 5 : 1));
+    expect(r.map((x) => x.qualification)).toEqual(['B II', 'A II']);
   });
 });
