@@ -56,7 +56,7 @@ interface Inputs {
   catalog?: QualificationCatalog;
   /** which range (or 'all') the cached catalog covers */
   catalogKey?: string;
-  offers?: Array<{ centerId: number; qualificationId: number | null; qualification: string }>;
+  offers?: Array<{ centerId: number; qualification: string }>;
   byQualification?: Map<string, Inputs>;
   /** set on the inputs of one qualification */
   qualification?: { key: string; name: string };
@@ -482,7 +482,7 @@ export class SimulationService {
       inputs.catalogKey = catalogKey;
     }
     inputs.offers ??= await this.db.query(
-      `SELECT center_id AS "centerId", qualification_id AS "qualificationId", qualification
+      `SELECT center_id AS "centerId", qualification
          FROM center_qualifications WHERE accredited_until IS NULL OR accredited_until >= $1`,
       [nowEpoch()],
     );
@@ -499,7 +499,7 @@ export class SimulationService {
     const { catalog, offers } = await this.qualificationCatalog(inputs, quarter);
     const q = catalog.byKey.get(key);
     if (!q) throw new BadRequestException('Unknown qualification');
-    const ids = new Set(offers.filter((o) => qualificationKey(o.qualification) === key || (o.qualificationId !== null && q.ids.has(o.qualificationId))).map((o) => o.centerId));
+    const ids = new Set(offers.filter((o) => qualificationKey(o.qualification) === key).map((o) => o.centerId));
     const slots = quarter
       ? new Map<number, number>(
           (
@@ -535,7 +535,7 @@ export class SimulationService {
       .map((q) => ({
         key: q.key,
         name: q.name,
-        centers: new Set(offers.filter((o) => listed.has(o.centerId) && (qualificationKey(o.qualification) === q.key || (o.qualificationId !== null && q.ids.has(o.qualificationId)))).map((o) => o.centerId)).size,
+        centers: new Set(offers.filter((o) => listed.has(o.centerId) && qualificationKey(o.qualification) === q.key).map((o) => o.centerId)).size,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -660,35 +660,30 @@ export class SimulationService {
     const provinces = [...new Set(picks.flatMap((p) => p.served.map((g) => g.provincePsgc)))];
     const demand: DemandRow[] = provinces.length
       ? await this.db.query(
-          `SELECT province_psgc AS "provincePsgc", min(qualification_id) AS "qualificationId", min(qualification) AS qualification,
+          `SELECT province_psgc AS "provincePsgc", min(qualification) AS qualification,
                   sum(graduates)::int AS graduates
              FROM upcoming_graduates WHERE province_psgc = ANY($1::text[])
             GROUP BY province_psgc, lower(qualification)`,
           [provinces],
         )
       : [];
-    const offered: Array<{ province: string; centerId: number; qid: number | null; label: string }> = demand.length
+    const offered: Array<{ province: string; centerId: number; label: string }> = demand.length
       ? await this.db.query(
-          `SELECT c.province_psgc AS province, c.id AS "centerId", cq.qualification_id AS qid, cq.qualification AS label
+          `SELECT c.province_psgc AS province, c.id AS "centerId", cq.qualification AS label
              FROM assessment_centers c JOIN center_qualifications cq ON cq.center_id = c.id
             WHERE c.include_in_analysis AND c.province_psgc = ANY($1::text[])`,
           [provinces],
         )
       : [];
-    // province -> centers offering, by qualification id and by normalised name (about 20% of the TESDA list has no id)
+    // province|normalised name -> centers offering it
     const supplyIndex = new Map<string, Set<number>>();
     for (const o of offered) {
-      for (const k of [o.qid !== null ? `${o.province}|id:${o.qid}` : null, `${o.province}|k:${qualificationKey(o.label)}`]) {
-        if (!k) continue;
-        (supplyIndex.get(k) ?? supplyIndex.set(k, new Set()).get(k)!).add(o.centerId);
-      }
+      const k = `${o.province}|${qualificationKey(o.label)}`;
+      (supplyIndex.get(k) ?? supplyIndex.set(k, new Set()).get(k)!).add(o.centerId);
     }
-    const supply = (provs: Set<string>, qualificationId: number | null, qualification: string) => {
+    const supply = (provs: Set<string>, qualification: string) => {
       const centers = new Set<number>();
-      for (const prov of provs) {
-        for (const k of [qualificationId !== null ? `${prov}|id:${qualificationId}` : null, `${prov}|k:${qualificationKey(qualification)}`])
-          for (const c of (k && supplyIndex.get(k)) || []) centers.add(c);
-      }
+      for (const prov of provs) for (const c of supplyIndex.get(`${prov}|${qualificationKey(qualification)}`) ?? []) centers.add(c);
       return centers.size;
     };
     const sites: SiteRecommendationDto[] = picks.map((p, i) => {

@@ -43,9 +43,8 @@ export class CentersService {
     const c = await this.load(user, id);
     // Qualifications as the TESDA API lists them.
     const programs = await this.db.query(
-      `SELECT cq.qualification_id AS id, regexp_replace(cq.qualification, ' (I|II|III|IV)$', ' NC \\1') AS title, q.code,
-              cq.accredited_until AS expires_at
-         FROM center_qualifications cq LEFT JOIN qualifications q ON q.id = cq.qualification_id
+      `SELECT regexp_replace(cq.qualification, ' (I|II|III|IV)$', ' NC \\1') AS title, cq.accredited_until AS expires_at
+         FROM center_qualifications cq
         WHERE cq.center_id = $1 ORDER BY cq.qualification`,
       [id],
     );
@@ -76,9 +75,7 @@ export class CentersService {
       coordStatus: c.coord_status,
       includeInAnalysis: c.include_in_analysis,
       qualifications: programs.map((p: Record<string, unknown>) => ({
-        id: p.id,
         title: p.title,
-        code: p.code,
         expiresAt: toEpoch(p.expires_at as string | null),
       })),
       current: await util(),
@@ -93,10 +90,10 @@ export class CentersService {
     const c = await this.load(user, id);
     const quarter = quarterLabel ? parseQuarter(quarterLabel) : currentQuarter();
     if (!quarter) throw new BadRequestException('quarter must look like 2026-Q4');
-    const programs: Array<{ name: string; id: number | null; title: string; code: string | null }> = await this.db.query(
-      `SELECT cq.qualification AS name, cq.qualification_id AS id,
-              regexp_replace(cq.qualification, ' (I|II|III|IV)$', ' NC \\1') AS title, q.code
-         FROM center_qualifications cq LEFT JOIN qualifications q ON q.id = cq.qualification_id
+    const programs: Array<{ name: string; title: string }> = await this.db.query(
+      `SELECT cq.qualification AS name,
+              regexp_replace(cq.qualification, ' (I|II|III|IV)$', ' NC \\1') AS title
+         FROM center_qualifications cq
         WHERE cq.center_id = $1 ORDER BY cq.qualification`,
       [id],
     );
@@ -112,7 +109,6 @@ export class CentersService {
     const seen = new Set<string>();
     const rows: Array<{
       key: string;
-      qualificationId: number | null;
       qualification: string;
       slots: number;
       candidates: number | null;
@@ -140,7 +136,6 @@ export class CentersService {
       }
       rows.push({
         key,
-        qualificationId: p.id,
         qualification: p.title,
         slots: programSlots,
         candidates: current?.demand ?? null,

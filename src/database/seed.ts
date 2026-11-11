@@ -55,7 +55,7 @@ async function main() {
     // TESDA API data (center_qualifications, upcoming_graduates) goes too: `npm run tesda:sync` reloads it on top of the seed.
     // So does the sync log, or the next sync would think the reseeded centers are already up to date and skip.
     await qr.query(`TRUNCATE center_utilization, area_utilization, simulation_runs, center_qualifications, upcoming_graduates,
-      tesda_syncs, bsrs_stats, assessment_centers, qualifications, cities, provinces RESTART IDENTITY CASCADE`);
+      tesda_syncs, bsrs_stats, assessment_centers, cities, provinces RESTART IDENTITY CASCADE`);
     await qr.query(
       `DELETE FROM users WHERE region_psgc IS NOT NULL OR province_psgc IS NOT NULL OR role = 'CO'`,
     );
@@ -116,20 +116,9 @@ async function main() {
       (await qr.query(`SELECT id, key FROM cities`)).map((r: { id: number; key: string }) => [r.key, r.id]),
     );
 
-    // T2MIS reference data
-    await insert(
-      qr,
-      'qualifications',
-      ['id', 'sector_id', 'title', 'code', 'level_id', 'enabled'],
-      load<Row>('qualifications.json').map((q) => ({
-        id: q.id,
-        sector_id: q.sectorId,
-        title: q.title,
-        code: q.code,
-        level_id: q.levelId,
-        enabled: q.enabled,
-      })),
-    );
+    // Assessment centers come from the TESDA API (`npm run tesda:sync`, part of db:setup). Only the centers whose position
+    // Team C corrected by hand are seeded, so the sync keeps that position over the API's raw point. They join the
+    // analysis once the sync has listed them.
     await insert(
       qr,
       'assessment_centers',
@@ -157,7 +146,7 @@ async function main() {
         'island_id',
         'created_at',
       ],
-      load<Row>('centers.json').map((c) => ({
+      load<Row>('center_corrections.json').map((c) => ({
         id: c.id,
         name: c.name,
         address: c.address,
@@ -174,7 +163,7 @@ async function main() {
         is_foreign: c.isForeign,
         is_closed: c.isClosed,
         is_hidden: c.isHidden,
-        include_in_analysis: c.includeInAnalysis,
+        include_in_analysis: false,
         city_id: c.cityKey ? (cityId.get(c.cityKey as string) ?? null) : null,
         province_psgc: c.provincePsgc,
         region_psgc: c.regionPsgc,

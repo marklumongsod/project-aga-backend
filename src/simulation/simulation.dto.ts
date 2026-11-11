@@ -120,8 +120,6 @@ export class RecommendQueryDto extends DashboardQueryDto {
 export class QualificationNeedDto {
   /** e.g. "Driving II" */
   qualification: string;
-  /** the T2MIS qualification id; null when the TESDA name has none */
-  qualificationId: number | null;
   /** candidates among those the site would serve who are likely to want it (an estimate) */
   estimatedCandidates: number;
   /** estimatedCandidates / the candidates served, 0 to 1 */

@@ -317,7 +317,7 @@ Hero: "Where can I get assessed near me?" + "Search your city or use your curren
 1. **Your location**: combobox.
    - Typing (≥ 2 chars, debounced 250 ms) → `GET /public/places?q=` → `[{ type: "CITY", key, name, province, region, lat, lon }]`. Show "Bantayan · Cebu, Region VII".
    - **Use my location** button → `navigator.geolocation.getCurrentPosition` (timeout 10 s). On success, search with `lat`/`lon`. On denial: "Location is off. Type your city instead."
-2. **Qualification**: combobox → `GET /public/qualifications?q=` → `[{ id, title, code, levelId, label: "Cookery NC II", centers: 53 }]`. Show `label`. Default "Any qualification". The list comes from the TESDA API; `id` (T2MIS QualId) is **null** for about 20% of qualifications, so search with `qualification={label}`, not `qualificationId`.
+2. **Qualification**: combobox → `GET /public/qualifications?q=` → `[{ title, levelId, label: "Cookery NC II", centers: 53 }]`. Show `label`. Default "Any qualification". The list comes from the TESDA API, which identifies a qualification by name only: search with `qualification={label}` and put the label in the page URL.
 3. **Region**: `GET /geo/regions` → `[{ psgc, name }]`. Default "Any region".
 4. **Province**: `GET /geo/regions/:psgc/provinces`. Enabled after a region is picked.
 
@@ -325,11 +325,11 @@ Put the search in the URL (`?city=0702209000&q=241&region=…&province=…`, or 
 
 ### 9.2 `GET /public/centers/nearest`
 
-Parameters: `lat`+`lon` **or** `cityKey`, plus optional `qualification` (a `label` from `/public/qualifications`; preferred), `qualificationId` (T2MIS QualId, older), `regionPsgc`, `provincePsgc`, `limit` (1–20, default 5; use 5).
+Parameters: `lat`+`lon` **or** `cityKey`, plus optional `qualification` (a `label` from `/public/qualifications`), `regionPsgc`, `provincePsgc`, `limit` (1–20, default 5; use 5).
 
 ```json
 { "origin": { "lat": 11.189, "lon": 123.744, "cityKey": "0702209000", "cityName": "Bantayan", "province": "Cebu", "islandId": 37 },
-  "filters": { "qualificationId": null, "qualification": null, "regionPsgc": null, "provincePsgc": null },
+  "filters": { "qualification": null, "regionPsgc": null, "provincePsgc": null },
   "limitMinutes": 90, "travelModel": "estimate(…)",
   "desert": true,
   "programData": null,

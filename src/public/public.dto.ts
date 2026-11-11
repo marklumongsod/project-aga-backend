@@ -40,15 +40,9 @@ export class NearestCentersDto {
   @MaxLength(80)
   cityKey?: string;
 
-  /** Only centers accredited for this qualification (T2MIS QualId) */
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  qualificationId?: number;
-
   /**
-   * Only centers accredited for this qualification, by its `label` from /public/qualifications ("Cookery NC II").
-   * Works for every qualification, including those TESDA lists that have no T2MIS QualId (`id` null).
+   * Only centers accredited for this qualification, by its `label` from /public/qualifications ("Cookery NC II");
+   * the TESDA API's own name ("Cookery II") also works.
    */
   @IsOptional()
   @IsString()

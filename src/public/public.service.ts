@@ -60,20 +60,20 @@ export class PublicService {
   }
 
   /**
-   * Qualification filter, from the TESDA API's center qualifications. `centers` = how many listed centers are
-   * accredited for it. `id` is the T2MIS QualId when the name matches one, else null: filter by `label` then.
+   * Qualification filter, from the TESDA API's center qualifications. `label` ("Cookery NC II") is what the finder
+   * searches with (`qualification=`); `centers` = how many listed centers are accredited for it.
    */
   qualifications(q?: string) {
     return this.db.query(
       `WITH l AS (
-         SELECT cq.center_id, cq.qualification_id, ${LABEL('cq.qualification')} AS label, ${ROMAN('cq.qualification')} AS roman,
+         SELECT cq.center_id, ${LABEL('cq.qualification')} AS label, ${ROMAN('cq.qualification')} AS roman,
                 regexp_replace(cq.qualification, ' (I|II|III|IV)$', '') AS base
            FROM center_qualifications cq JOIN assessment_centers c ON c.id = cq.center_id AND c.include_in_analysis)
-       SELECT max(l.qualification_id) AS id, coalesce(max(q.title), max(l.base)) AS title, max(q.code) AS code,
-              coalesce(max(q.level_id), CASE max(l.roman) WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 END) AS "levelId",
+       SELECT max(l.base) AS title,
+              CASE max(l.roman) WHEN 'I' THEN 1 WHEN 'II' THEN 2 WHEN 'III' THEN 3 WHEN 'IV' THEN 4 END AS "levelId",
               l.label, count(DISTINCT l.center_id)::int AS centers
-         FROM l LEFT JOIN qualifications q ON q.id = l.qualification_id
-        WHERE ($1::text IS NULL OR l.label ILIKE $1 OR q.code ILIKE $1)
+         FROM l
+        WHERE ($1::text IS NULL OR l.label ILIKE $1 OR l.base ILIKE $1)
         GROUP BY l.label
         ORDER BY count(DISTINCT l.center_id) DESC, l.label LIMIT 50`,
       [q ? like(q) : null],
@@ -136,18 +136,16 @@ export class PublicService {
          LEFT JOIN cities ci ON ci.id = c.city_id
          LEFT JOIN provinces p ON p.psgc = c.province_psgc
         WHERE c.include_in_analysis
-          AND ($3::int IS NULL OR EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id AND cq.qualification_id = $3))
-          AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id
-                                             AND (lower(cq.qualification) = lower($7) OR lower(${LABEL('cq.qualification')}) = lower($7))))
-          AND ($4::text IS NULL OR c.region_psgc = $4)
-          AND ($5::text IS NULL OR c.province_psgc = $5)
-          AND ST_DWithin(c.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $6 * 1000)
+          AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id
+                                             AND (lower(cq.qualification) = lower($6) OR lower(${LABEL('cq.qualification')}) = lower($6))))
+          AND ($3::text IS NULL OR c.region_psgc = $3)
+          AND ($4::text IS NULL OR c.province_psgc = $4)
+          AND ST_DWithin(c.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5 * 1000)
         ORDER BY c.location::geography <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
         LIMIT 60`,
         [
           origin.lon,
           origin.lat,
-          dto.qualificationId ?? null,
           dto.regionPsgc ?? null,
           dto.provincePsgc ?? null,
           SEARCH_RADIUS_KM,
@@ -157,7 +155,7 @@ export class PublicService {
 
     // Qualification lists come from the TESDA API; a center whose detail call has never succeeded has none.
     let programData: { centersNearby: number; centersWithProgramData: number } | null = null;
-    if (dto.qualificationId || dto.qualification) {
+    if (dto.qualification) {
       const [cov] = await this.db.query(
         `SELECT count(*)::int AS nearby,
                 count(*) FILTER (WHERE EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id))::int AS with_programs
@@ -223,7 +221,6 @@ export class PublicService {
     return {
       origin,
       filters: {
-        qualificationId: dto.qualificationId ?? null,
         qualification: dto.qualification || null,
         regionPsgc: dto.regionPsgc ?? null,
         provincePsgc: dto.provincePsgc ?? null,

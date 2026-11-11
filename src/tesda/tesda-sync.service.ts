@@ -17,9 +17,6 @@ const MIN_SHARE_OF_LISTED = 0.5;
 /** Refuse a students pull that would leave fewer than this share of the graduates stored now: an API problem. */
 const MIN_SHARE_OF_GRADUATES = 0.5;
 
-/** Title + level as the TESDA API writes it: "Cookery" level 2 -> "Cookery II". */
-const API_LABEL_SQL = `q.title || CASE q.level_id WHEN 1 THEN ' I' WHEN 2 THEN ' II' WHEN 3 THEN ' III' WHEN 4 THEN ' IV' ELSE '' END`;
-
 /** City for a point: the polygon containing it, else the nearest within 0.05 degrees (as the ETL does). */
 const CITY_OF_POINT_SQL = (point: string) => `
   SELECT ci.id, ci.province_psgc, ci.region_psgc, ci.island_id FROM cities ci
@@ -35,7 +32,6 @@ export interface TesdaSyncStats {
   inAnalysis: number;
   skippedRows: number;
   qualifications: number;
-  qualificationsMatchedToT2mis: number;
   /** set when the qualification lists could not be pulled; the previous ones were kept */
   qualificationsError?: string;
   graduates: UpcomingGraduatesStats | { skipped: string };
@@ -50,8 +46,6 @@ export interface UpcomingGraduatesStats {
   provinceOnly: number;
   /** no usable point, qualification or month, or a point in no province */
   notPlaced: number;
-  /** placed graduates whose qualification has a T2MIS QualId */
-  matchedToT2mis: number;
 }
 
 @Injectable()
@@ -242,12 +236,9 @@ export class TesdaSyncService {
       }
     if (quals) await m.query(`DELETE FROM center_qualifications`);
     if (quals) await m.query(
-      `INSERT INTO center_qualifications (center_id, qualification, qualification_id, accredited_until)
-       SELECT u.center_id, u.qualification, t2.id, u.accredited_until
+      `INSERT INTO center_qualifications (center_id, qualification, accredited_until)
+       SELECT u.center_id, u.qualification, u.accredited_until
          FROM unnest($1::int[], $2::text[], $3::bigint[]) AS u(center_id, qualification, accredited_until)
-         LEFT JOIN (SELECT DISTINCT ON (lower(${API_LABEL_SQL})) lower(${API_LABEL_SQL}) AS label, q.id
-                      FROM qualifications q ORDER BY lower(${API_LABEL_SQL}), q.enabled DESC, q.id DESC) t2
-           ON t2.label = lower(u.qualification)
        ON CONFLICT DO NOTHING`,
       [qc, qn, qu],
     );
@@ -256,8 +247,7 @@ export class TesdaSyncService {
       `SELECT (SELECT count(*) FROM tesda_moved WHERE is_new)::int AS new_centers,
               (SELECT count(*) FROM tesda_moved WHERE NOT is_new)::int AS moved,
               (SELECT count(*) FROM assessment_centers WHERE include_in_analysis)::int AS in_analysis,
-              (SELECT count(*) FROM center_qualifications)::int AS qualifications,
-              (SELECT count(*) FROM center_qualifications WHERE qualification_id IS NOT NULL)::int AS matched`,
+              (SELECT count(*) FROM center_qualifications)::int AS qualifications`,
     );
     return {
       centers: centers.length,
@@ -267,7 +257,6 @@ export class TesdaSyncService {
       delisted,
       inAnalysis: counts.in_analysis,
       qualifications: counts.qualifications,
-      qualificationsMatchedToT2mis: counts.matched,
     };
   }
 
@@ -288,21 +277,17 @@ export class TesdaSyncService {
       }
       await m.query(`DELETE FROM upcoming_graduates`);
       await m.query(
-        `INSERT INTO upcoming_graduates (province_psgc, city_id, qualification, qualification_id, finish_month, graduates)
-         SELECT c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, min(u.qualification), t2.id, u.month, sum(u.graduates)
+        `INSERT INTO upcoming_graduates (province_psgc, city_id, qualification, finish_month, graduates)
+         SELECT c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, min(u.qualification), u.month, sum(u.graduates)
            FROM unnest($1::float8[], $2::float8[], $3::text[], $4::text[], $5::bigint[], $6::int[])
                 AS u(lat, lon, precision, qualification, month, graduates)
            JOIN LATERAL (${CITY_OF_POINT_SQL('ST_SetSRID(ST_MakePoint(u.lon, u.lat), 4326)')}) c ON true
-           LEFT JOIN (SELECT DISTINCT ON (lower(${API_LABEL_SQL})) lower(${API_LABEL_SQL}) AS label, q.id
-                        FROM qualifications q ORDER BY lower(${API_LABEL_SQL}), q.enabled DESC, q.id DESC) t2
-             ON t2.label = lower(u.qualification)
-          GROUP BY c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, lower(u.qualification), t2.id, u.month`,
+          GROUP BY c.province_psgc, CASE WHEN u.precision = 'city' THEN c.id END, lower(u.qualification), u.month`,
         [g.map((x) => x.lat), g.map((x) => x.lon), g.map((x) => x.precision), g.map((x) => x.qualification), g.map((x) => x.month), g.map((x) => x.graduates)],
       );
       const [r] = await m.query(
         `SELECT coalesce(sum(graduates) FILTER (WHERE city_id IS NOT NULL), 0)::int AS in_town,
-                coalesce(sum(graduates) FILTER (WHERE city_id IS NULL), 0)::int AS province_only,
-                coalesce(sum(graduates) FILTER (WHERE qualification_id IS NOT NULL), 0)::int AS matched
+                coalesce(sum(graduates) FILTER (WHERE city_id IS NULL), 0)::int AS province_only
            FROM upcoming_graduates`,
       );
       return {
@@ -310,7 +295,6 @@ export class TesdaSyncService {
         inTown: r.in_town,
         provinceOnly: r.province_only,
         notPlaced: pulled.skipped + placedGraduates - r.in_town - r.province_only,
-        matchedToT2mis: r.matched,
       };
     });
   }

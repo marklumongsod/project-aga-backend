@@ -3,7 +3,6 @@ import {
   AssessmentCenter,
   CenterQualification,
   CenterQualificationSlot,
-  Qualification,
   TesdaSync,
   UpcomingGraduates,
 } from './t2mis.entity';
@@ -24,7 +23,6 @@ export const ENTITIES = [
   Region,
   Province,
   City,
-  Qualification,
   AssessmentCenter,
   CenterQualification,
   CenterQualificationSlot,
