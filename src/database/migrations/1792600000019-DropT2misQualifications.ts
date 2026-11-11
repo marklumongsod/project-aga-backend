@@ -9,6 +9,9 @@ export class DropT2misQualifications1792600000019 implements MigrationInterface 
   name = 'DropT2misQualifications1792600000019';
 
   public async up(q: QueryRunner): Promise<void> {
+    // A database that ran the utilization branch before this merge may have a slot table pointing at qualifications.
+    await q.query(`ALTER TABLE IF EXISTS "center_qualification_slots" DROP CONSTRAINT IF EXISTS "FK_center_qualification_slots_qualification"`);
+    await q.query(`ALTER TABLE IF EXISTS "center_qualification_slots" DROP COLUMN IF EXISTS "qualification_id"`);
     await q.query(`ALTER TABLE "center_qualifications" DROP CONSTRAINT IF EXISTS "FK_center_qualifications_qualification"`);
     await q.query(`DROP INDEX IF EXISTS "IDX_center_qualifications_qualification_id"`);
     await q.query(`ALTER TABLE "center_qualifications" DROP COLUMN "qualification_id"`);
