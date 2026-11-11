@@ -1,10 +1,12 @@
-import { Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuthUser } from '../common/auth.decorators';
 import { isoBand, toEpoch } from '../common/rate-band';
+import { currentQuarter, parseQuarter } from '../common/quarter';
 import { AreaLevel } from '../database/entities';
 import { AreaScopeService } from '../scope/area-scope.service';
+import { qualificationKey } from '../simulation/qualification-need';
 import { SimulationService } from '../simulation/simulation.service';
 import { RoutingService } from '../simulation/travel/routing.service';
 import { routedIsochrones } from './isochrone';
@@ -84,9 +86,77 @@ export class CentersService {
   }
 
   /**
-   * Click a center: cities/municipalities by travel time to it (live OSRM road + ferry when enabled, else the estimate), as GeoJSON
-   * (isochrone bands: <=1/3, <=2/3, <=1x, <=1.5x the limit). Highlights the area within the travel limit (90 minutes unless `limitMinutes` is given).
+   * Capacity utilization for every qualification this center offers, for one quarter. Each qualification is a
+   * one-off capacity run (nearest center with an open slot); the first call creates the run, later calls reuse it.
    */
+  async utilization(user: AuthUser, id: number, limitMinutes?: number, quarterLabel?: string) {
+    const c = await this.load(user, id);
+    const quarter = quarterLabel ? parseQuarter(quarterLabel) : currentQuarter();
+    if (!quarter) throw new BadRequestException('quarter must look like 2026-Q4');
+    const programs: Array<{ name: string; id: number | null; title: string; code: string | null }> = await this.db.query(
+      `SELECT cq.qualification AS name, cq.qualification_id AS id,
+              regexp_replace(cq.qualification, ' (I|II|III|IV)$', ' NC \\1') AS title, q.code
+         FROM center_qualifications cq LEFT JOIN qualifications q ON q.id = cq.qualification_id
+        WHERE cq.center_id = $1 ORDER BY cq.qualification`,
+      [id],
+    );
+    const slotRows: Array<{ qualification_key: string; slots: number }> = await this.db.query(
+      `SELECT qualification_key, sum(slots)::int AS slots
+         FROM center_qualification_slots
+        WHERE center_id = $1 AND month_start >= $2 AND month_start < $3
+        GROUP BY qualification_key`,
+      [id, quarter.start, quarter.end],
+    );
+    const slots = new Map(slotRows.map((r) => [r.qualification_key, r.slots]));
+    const limit = limitMinutes ?? this.sim.limits.limitMinutes;
+    const seen = new Set<string>();
+    const rows: Array<{
+      key: string;
+      qualificationId: number | null;
+      qualification: string;
+      slots: number;
+      candidates: number | null;
+      assigned: number | null;
+      utilization: number | null;
+      serviceRate: number | null;
+    }> = [];
+    for (const p of programs) {
+      const key = qualificationKey(p.name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const programSlots = slots.get(key) ?? 0;
+      let current: { demand: number; assigned: number | null; utilization: number | null; service_rate: number | null } | null = null;
+      if (programSlots > 0) {
+        try {
+          const run = await this.sim.runFor(limit, p.name, quarter.label);
+          const [u] = await this.db.query(
+            `SELECT demand, assigned, utilization, service_rate FROM center_utilization WHERE run_id = $1 AND center_id = $2`,
+            [run.id, id],
+          );
+          current = u ?? null;
+        } catch {
+          // No candidates/centers for this qualification in the quarter: still show its slots.
+        }
+      }
+      rows.push({
+        key,
+        qualificationId: p.id,
+        qualification: p.title,
+        slots: programSlots,
+        candidates: current?.demand ?? null,
+        assigned: current?.assigned ?? null,
+        utilization: current?.utilization ?? null,
+        serviceRate: current?.service_rate ?? null,
+      });
+    }
+    return {
+      center: { id: c.id, name: c.name, city: c.city_name, province: c.province_name, region: c.region_name },
+      quarter: quarter.label,
+      limitMinutes: limit,
+      qualifications: rows,
+    };
+  }
+
   async reach(user: AuthUser, id: number, limit?: number) {
     const c = await this.load(user, id);
     const limitMinutes = limit ?? this.sim.limits.limitMinutes;

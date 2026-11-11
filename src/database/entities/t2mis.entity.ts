@@ -1,4 +1,4 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn, PrimaryGeneratedColumn, Unique } from 'typeorm';
 import type { Point } from 'geojson';
 import { City, Province } from './geography.entity';
 import { EPOCH_NOW_SQL, epochTransformer } from '../epoch';
@@ -191,6 +191,61 @@ export class UpcomingGraduates {
 
   @Column({ type: 'int' })
   graduates: number;
+
+  /** 'tesda' for the nightly API sync, 'demo' for local demo data */
+  @Index('IDX_upcoming_graduates_source')
+  @Column({ default: 'tesda' })
+  source: string;
+}
+
+/**
+ * Assessment capacity of one center for one qualification in one month. Slots are counted per program, per center,
+ * per month; a quarter's capacity is the sum of its three months. `source` is 'demo' until TESDA/NCR provide real data.
+ */
+@Entity({ name: 'center_qualification_slots' })
+@Unique('UQ_center_qualification_slots', ['centerId', 'qualificationKey', 'monthStart'])
+export class CenterQualificationSlot {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Index('IDX_center_qualification_slots_center')
+  @Column({ name: 'center_id', type: 'int' })
+  centerId: number;
+
+  @ManyToOne(() => AssessmentCenter, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'center_id' })
+  center?: AssessmentCenter;
+
+  /** normalized qualification key (the same key the simulation uses) */
+  @Index('IDX_center_qualification_slots_key')
+  @Column({ name: 'qualification_key' })
+  qualificationKey: string;
+
+  @Column({ name: 'qualification_id', type: 'int', nullable: true })
+  qualificationId: number | null;
+
+  @ManyToOne(() => Qualification, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'qualification_id' })
+  qualificationRef?: Qualification;
+
+  /** display name, e.g. "Cookery II" */
+  @Column()
+  qualification: string;
+
+  /** 00:00 Asia/Manila on the 1st of the month, epoch seconds */
+  @Index('IDX_center_qualification_slots_month')
+  @Column({ name: 'month_start', type: 'bigint', transformer: epochTransformer })
+  monthStart: number;
+
+  @Column({ type: 'int' })
+  slots: number;
+
+  /** 'demo' | 'tesda' | 'ncr' */
+  @Column({ default: 'demo' })
+  source: string;
+
+  @Column({ name: 'as_of', type: 'bigint', transformer: epochTransformer })
+  asOf: number;
 }
 
 /** One run of the TESDA API sync. */

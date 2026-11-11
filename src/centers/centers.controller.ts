@@ -16,6 +16,12 @@ export class CentersController {
     return this.centers.detail(user, id, q.limitMinutes);
   }
 
+  /** Capacity utilization for each qualification the center offers, for one quarter (default: current quarter). */
+  @Get(':id/utilization')
+  utilization(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Query() q: CenterQueryDto) {
+    return this.centers.utilization(user, id, q.limitMinutes, q.quarter);
+  }
+
   /** Area reachable within the travel limit (click a center to highlight it). */
   @Get(':id/reach')
   reach(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Query() q: CenterQueryDto) {

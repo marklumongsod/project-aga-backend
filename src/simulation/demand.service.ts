@@ -56,12 +56,14 @@ export class DemandService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
   /** Upcoming graduates per qualification (matched by name, so "Driving II" and "DRIVING NC II" are one), counts only. */
-  async qualificationCatalog(): Promise<QualificationCatalog> {
+  async qualificationCatalog(range?: { start: number; end: number }): Promise<QualificationCatalog> {
     const cities: CityRow[] = await this.db.query(`SELECT key, province_psgc, region_psgc, lat, lon, island_id FROM cities ORDER BY key`);
     const rows: Array<{ province_psgc: string; city_key: string | null; qualification: string; qualification_id: number | null; graduates: number }> = await this.db.query(
       `SELECT g.province_psgc, c.key AS city_key, g.qualification, g.qualification_id, sum(g.graduates)::int AS graduates
          FROM upcoming_graduates g LEFT JOIN cities c ON c.id = g.city_id
+        ${range ? 'WHERE g.finish_month >= $1 AND g.finish_month < $2' : ''}
         GROUP BY 1, 2, 3, 4`,
+      range ? [range.start, range.end] : [],
     );
     const byKey = new Map<string, QualificationDemand>();
     const nameCount = new Map<string, Map<string, number>>();
@@ -138,7 +140,10 @@ export class DemandService {
     const graduates = new Map<string, number>(
       (
         await this.db.query(
-          `SELECT c.key, sum(g.graduates)::int AS graduates FROM upcoming_graduates g JOIN cities c ON c.id = g.city_id GROUP BY c.key`,
+          `SELECT c.key, sum(g.graduates)::int AS graduates
+             FROM upcoming_graduates g JOIN cities c ON c.id = g.city_id
+            WHERE g.source <> 'demo'
+            GROUP BY c.key`,
         )
       ).map((r: { key: string; graduates: number }) => [r.key, r.graduates]),
     );

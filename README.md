@@ -19,6 +19,7 @@ docker compose up -d db           # PostgreSQL 16 + PostGIS
 npm ci
 npm run db:setup                  # migrations + seed (geography, BSRS, demo accounts) + TESDA API sync + data-quality recovery
 npm run simulate                  # first simulation run (then daily at SIM_CRON)
+npm run demo:utilization -- --quarter=2026-Q4   # optional: demo slots + per-qualification candidates for the capacity view
 npm run start:dev                 # http://localhost:3000/api/v1, docs at http://localhost:3000/docs
 ```
 
@@ -47,10 +48,11 @@ npm run lint        # type-check
 | POST | `/auth/login` | public | Normal sign-in → JWT |
 | POST | `/auth/sso/t2mis` | public | TESDA SSO (T2MIS). Returns 501 until the T2MIS OIDC issuer is configured |
 | GET | `/auth/me` | office | User and area scope |
-| GET | `/dashboard/overview?level=&code=&limitMinutes=` | office | KPIs, Top 5 / Top 3, all child areas. Defaults to the user's home area |
-| GET | `/dashboard/map` | office | GeoJSON choropleth of child areas (`desertLevel`, `densityBand` and `flaggedShare` per area, plus the desert and density legends) |
-| GET | `/dashboard/centers` | office | Centers in the area: predicted candidates |
+| GET | `/dashboard/overview?level=&code=&limitMinutes=&qualification=&quarter=` | office | KPIs, Top 5 / Top 3, all child areas. Add `qualification` + `quarter` for capacity utilization |
+| GET | `/dashboard/map` | office | GeoJSON choropleth of child areas (`desertLevel`, `densityBand`, `flaggedShare`; with `qualification`+`quarter`: `utilization`, `utilizationBand` and `utilizationLegend`) |
+| GET | `/dashboard/centers` | office | Centers in the area: predicted candidates; with `qualification`+`quarter`: slots, assigned, utilization |
 | GET | `/centers/:id` | office | Center card: qualifications, predicted candidates |
+| GET | `/centers/:id/utilization?quarter=` | office | Capacity utilization per qualification the center offers |
 | GET | `/centers/:id/reach` | office | Cities by travel time to the center (the fallback when there is no routing) |
 | GET | `/centers/:id/isochrone` | office | True drive-time polygons (30 / 60 / 90 minutes) from OSRM road and ferry routing; 503 without routing |
 | GET | `/simulation/snap?lat=&lon=&level=&code=` | office | Move a hand-placed pin onto the nearest road (within 5 km, inside the area), or leave it where it is |
@@ -79,7 +81,7 @@ Public responses never include learner data, candidate counts or flagged counts.
 
 ## Reach, flagged candidates and deserts
 
-Implemented in `src/simulation/engine/utilization-engine.ts` (pure, unit-tested). There is no capacity model: slots are not counted.
+Implemented in `src/simulation/engine/utilization-engine.ts` (pure, unit-tested). The regular run counts reach, not slots. A separate capacity view (`?qualification=&quarter=`) adds slots and utilization.
 
 ```
 for each city (a group of candidates):
@@ -94,6 +96,27 @@ flagged share = flagged / candidates
 - Centers are listed **nearest-first** by travel time.
 - **Predicted candidates** for a center = candidates whose nearest reachable center it is.
 - A flagged candidate is therefore one with no center in reach, so flagged candidates equal the candidates in desert cities.
+
+### Capacity utilization (per center and qualification, per quarter)
+
+Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity run assigns each qualification's candidates to the **nearest accredited center with an open slot within 90 minutes**; if that center is full, the candidate overflows to the next reachable center. Anyone left is flagged.
+
+- Slots are stored monthly in `center_qualification_slots`: one row per center × qualification × month. A quarter is the sum of its three months.
+- The local demo rule is **20 slots per program per center per month** (60 per quarter). Real NCR/TESDA data can replace it month by month.
+- `utilization = candidates wanting the center ÷ quarter slots` (can exceed 100%; more candidates than capacity). At area level it is the area's candidates ÷ the area's slots.
+- `assigned` = candidates actually placed in an open slot; `serviceRate = assigned ÷ candidates`.
+- The center card endpoint `/centers/:id/utilization?quarter=2026-Q4` lists slots, candidates, assigned and utilization for every qualification the center offers.
+- `utilizationLegend` is returned with the dashboard/map; bands go from green (low) to red (above 100%). Each band has a text label.
+- Example:
+  ```http
+  GET /api/v1/dashboard/overview?qualification=cookery%20ii&quarter=2026-Q4
+  GET /api/v1/centers/1974/utilization?quarter=2026-Q4
+  ```
+- Demo data:
+  ```bash
+  npm run demo:utilization -- --quarter=2026-Q4
+  ```
+  This inserts demo slots and demo per-qualification candidates (`source = 'demo'`) for the selected quarter. It does not touch TESDA rows, and it is safe to rerun. The regular reach simulation ignores demo graduate rows when splitting BSRS province totals.
 
 ### Assessment deserts, hotspots and density (team doc)
 
@@ -119,8 +142,9 @@ Coordinates are WGS84 longitude/latitude, **EPSG:4326**, in every PostGIS column
 | --- | --- | --- |
 | Candidates | BSRS completed per city. Province totals are split by TESDA graduates per town (20% evenly) where there is no city data; NCR districts are split over their cities | T2MIS enrollee-candidates per city |
 | Travel time | `TRAVEL_MODEL=estimate`: straight line × 1.35 at 35 km/h, +90 min per sea crossing. `TRAVEL_MODEL=osrm`: real road + ferry times from OpenStreetMap (see *Real travel times* below) | Same, plus traffic and ferry schedules (OSRM knows neither) |
+| Slots | Demo: 20 per program per center per month (= 60 per quarter), stored in `center_qualification_slots`; `npm run demo:utilization` fills it | TESDA/NCR slots per center, qualification and month, imported from the real capacity report |
 | Next quarter | Not built: there is no forecast. The TESDA students sync keeps `upcoming_graduates` (per finish month) for it | Team C ML forecast (seasonal naive / SARIMA / gradient boosting with lags) |
-| Per qualification | Not computed: per-qualification candidate counts exist only for BARMM | BSRS / T2MIS counts per qualification, then the reach check can run once per course |
+| Per qualification | The capacity view uses upcoming TESDA graduates per town and qualification as a candidate proxy; the regular dashboard is all-qualification BSRS | T2MIS/BSRS candidate counts per city and qualification, then utilization per course with real data |
 
 ### Real travel times (OSRM)
 

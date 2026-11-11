@@ -17,6 +17,8 @@ import { AreaScopeService } from '../scope/area-scope.service';
 import { DemandGroup, DemandService, QualificationCatalog } from './demand.service';
 import { DemandRow, estimateQualificationNeed, qualificationKey } from './qualification-need';
 import { EngineResult, SimCenter, SimGroup, UtilizationEngine } from './engine/utilization-engine';
+import { CapacityEngine, CapacityResult } from './engine/capacity-engine';
+import { Quarter, parseQuarter } from '../common/quarter';
 import {
   AreaDeltaDto,
   PinReachQueryDto,
@@ -52,10 +54,16 @@ interface Inputs {
   names?: Map<string, string>;
   /** upcoming graduates per qualification, loaded the first time a qualification is asked for */
   catalog?: QualificationCatalog;
+  /** which range (or 'all') the cached catalog covers */
+  catalogKey?: string;
   offers?: Array<{ centerId: number; qualificationId: number | null; qualification: string }>;
   byQualification?: Map<string, Inputs>;
   /** set on the inputs of one qualification */
   qualification?: { key: string; name: string };
+  /** capacity run: slots per center for this qualification and quarter */
+  slots?: ReadonlyMap<number, number>;
+  /** capacity run: the selected quarter */
+  quarter?: Quarter;
 }
 
 interface AreaAgg {
@@ -65,6 +73,9 @@ interface AreaAgg {
   candidates: number;
   flagged: number;
   centers: number;
+  /** capacity run only: slots and assigned candidates in this area */
+  slots: number;
+  assigned: number;
   /** cities: desert level 1-4 (0 = no); larger areas: the highest level inside */
   desertLevel: number;
   desertCities: number;
@@ -199,7 +210,7 @@ export class SimulationService {
     return [await this.persist(inputs, inputs.current, current, triggeredBy)];
   }
 
-  private aggregate(inputs: Inputs, groups: DemandGroup[], r: EngineResult): AreaAgg[] {
+  private aggregate(inputs: Inputs, groups: DemandGroup[], r: EngineResult, capacity?: CapacityResult): AreaAgg[] {
     const map = new Map<string, AreaAgg>();
     const get = (level: AreaLevel, key: string, parent: string | null) => {
       const id = `${level}:${key}`;
@@ -214,6 +225,8 @@ export class SimulationService {
             candidates: 0,
             flagged: 0,
             centers: 0,
+            slots: 0,
+            assigned: 0,
             desertLevel: 0,
             desertCities: 0,
             desertCandidates: 0,
@@ -226,36 +239,42 @@ export class SimulationService {
     const cityParent = new Map<string, { p: string; r: string }>();
     for (const g of groups) {
       cityParent.set(g.key, { p: g.provincePsgc, r: g.regionPsgc });
-      const res = r.groups.get(g.key)!;
-      const isDesert = res.count > 0 && res.nearestMinutes === null;
-      const level = isDesert ? desertLevel(res.count) : 0;
+      const reach = r.groups.get(g.key)!;
+      const cap = capacity?.groups.get(g.key);
+      const flagged = cap ? cap.flagged : reach.flagged;
+      const nearestMinutes = cap ? cap.nearestMinutes : reach.nearestMinutes;
+      const isDesert = g.count > 0 && nearestMinutes === null;
+      const level = isDesert ? desertLevel(g.count) : 0;
       for (const a of [
         get(AreaLevel.NATIONAL, 'PH', null),
         get(AreaLevel.REGION, g.regionPsgc, 'PH'),
         get(AreaLevel.PROVINCE, g.provincePsgc, g.regionPsgc),
         get(AreaLevel.CITY, g.key, g.provincePsgc),
       ]) {
-        a.candidates += res.count;
-        a.flagged += res.flagged;
+        a.candidates += g.count;
+        a.flagged += flagged;
+        a.assigned += cap?.assigned ?? 0;
         // Only a city's share is an estimate; the province total it was split from is a measured BSRS figure.
-        if (a.level === AreaLevel.CITY && (g.source === 'split_province' || g.source === 'split_district')) a.estimatedCandidates += res.count;
+        if (a.level === AreaLevel.CITY && (g.source === 'split_province' || g.source === 'split_district')) a.estimatedCandidates += g.count;
         // Team doc: an assessment desert is a city with candidates and no center within the travel range.
         if (isDesert) {
           a.desertCities += 1;
-          a.desertCandidates += res.count;
+          a.desertCandidates += g.count;
           a.desertLevel = Math.max(a.desertLevel, level);
         }
       }
       const city = map.get(`${AreaLevel.CITY}:${g.key}`)!;
-      city.nearestMinutes = res.nearestMinutes === null ? null : Math.round(res.nearestMinutes * 10) / 10;
+      city.nearestMinutes = nearestMinutes === null ? null : Math.round(nearestMinutes * 10) / 10;
     }
     for (const c of inputs.centers) {
       const areas = [get(AreaLevel.NATIONAL, 'PH', null)];
       if (c.regionPsgc) areas.push(get(AreaLevel.REGION, c.regionPsgc, 'PH'));
       if (c.provincePsgc) areas.push(get(AreaLevel.PROVINCE, c.provincePsgc, c.regionPsgc));
       if (c.cityKey) areas.push(get(AreaLevel.CITY, c.cityKey, c.provincePsgc));
+      const slots = inputs.slots?.get(c.id) ?? 0;
       for (const a of areas) {
         a.centers += 1;
+        a.slots += slots;
       }
     }
     return [...map.values()];
@@ -266,7 +285,8 @@ export class SimulationService {
     groups: DemandGroup[],
     r: EngineResult,
     triggeredBy: string,
-    custom?: { limitMinutes: number; qualification?: { key: string; name: string } },
+    custom?: { limitMinutes: number; qualification?: { key: string; name: string }; quarter?: Quarter },
+    capacity?: CapacityResult,
   ) {
     const limitMinutes = custom?.limitMinutes ?? this.limits.limitMinutes;
     const runRepo = this.db.getRepository(SimulationRun);
@@ -278,15 +298,17 @@ export class SimulationService {
         triggeredBy,
         adhoc: !!custom,
         qualificationKey: custom?.qualification?.key ?? null,
+        quarterStart: custom?.quarter?.start ?? null,
       }),
     );
     try {
-      const areas = this.aggregate(inputs, groups, r);
+      const areas = this.aggregate(inputs, groups, r, capacity);
+      const totals = capacity ? capacity.totals : r.totals;
       const summary: RunSummary = {
-        candidates: r.totals.candidates,
-        flagged: r.totals.flagged,
+        candidates: totals.candidates,
+        flagged: totals.flagged,
         centers: inputs.centers.length,
-        flaggedShare: r.totals.candidates ? r.totals.flagged / r.totals.candidates : 0,
+        flaggedShare: totals.candidates ? totals.flagged / totals.candidates : 0,
         assumptions: {
           candidates: custom?.qualification
             ? `upcoming TESDA graduates in ${custom.qualification.name}, per town (province-only figures split over the towns)`
@@ -294,6 +316,8 @@ export class SimulationService {
           centers: 'assessment centers listed by the TESDA Assessor Coverage API (synced nightly)',
           limitMinutes,
           travel: this.travel.name,
+          ...(custom?.quarter ? { quarter: custom.quarter.label } : {}),
+          ...(capacity ? { utilization: 'capacity-aware: nearest center with an open slot, 90 minutes' } : {}),
         },
       };
       await this.db.transaction(async (m) => {
@@ -307,6 +331,10 @@ export class SimulationService {
             flagged: a.flagged,
             centers: a.centers,
             flaggedShare: a.candidates ? a.flagged / a.candidates : 0,
+            slots: capacity ? a.slots : null,
+            assigned: capacity ? a.assigned : null,
+            utilization: capacity && a.slots > 0 ? a.candidates / a.slots : null,
+            serviceRate: capacity && a.candidates > 0 ? a.assigned / a.candidates : null,
             desertLevel: a.desertLevel,
             desertCities: a.desertCities,
             desertCandidates: a.desertCandidates,
@@ -316,13 +344,29 @@ export class SimulationService {
         );
         for (let i = 0; i < areaRows.length; i += 1000)
           await m.insert(AreaUtilization, areaRows.slice(i, i + 1000));
-        const centerRows = [...r.centers.values()].map((c) =>
-          m.create(CenterUtilization, {
-            runId: run.id,
-            centerId: c.id,
-            demand: c.demand,
-          }),
-        );
+        const centerRows = capacity
+          ? [...capacity.centers.values()].map((c) =>
+              m.create(CenterUtilization, {
+                runId: run.id,
+                centerId: c.id,
+                demand: c.demand,
+                slots: c.slots,
+                assigned: c.assigned,
+                utilization: c.slots > 0 ? c.demand / c.slots : null,
+                serviceRate: c.demand > 0 ? c.assigned / c.demand : null,
+              }),
+            )
+          : [...r.centers.values()].map((c) =>
+              m.create(CenterUtilization, {
+                runId: run.id,
+                centerId: c.id,
+                demand: c.demand,
+                slots: null,
+                assigned: null,
+                utilization: null,
+                serviceRate: null,
+              }),
+            );
         for (let i = 0; i < centerRows.length; i += 1000)
           await m.insert(CenterUtilization, centerRows.slice(i, i + 1000));
         await m.update(SimulationRun, run.id, {
@@ -380,60 +424,105 @@ export class SimulationService {
    * (?limitMinutes=) - a one-off run with that limit. One-off runs are stored like any run (so the dashboard queries
    * read them unchanged) but flagged `adhoc`, kept for ADHOC_TTL_SECONDS and never part of the history.
    */
-  async runFor(limitMinutes?: number, qualification?: string): Promise<SimulationRun> {
+  async runFor(limitMinutes?: number, qualification?: string, quarterLabel?: string): Promise<SimulationRun> {
     const qualKey = qualification ? qualificationKey(qualification) : '';
+    const quarter = quarterLabel ? parseQuarter(quarterLabel) ?? undefined : undefined;
+    if (quarterLabel && !quarter) throw new BadRequestException('quarter must look like 2026-Q4');
+    if (quarter && !qualKey) throw new BadRequestException('qualification is required with quarter');
     const limit = limitMinutes ?? this.limits.limitMinutes;
-    if (!qualKey && limit === this.limits.limitMinutes) return this.latestRun();
+    if (!qualKey && !quarter && limit === this.limits.limitMinutes) return this.latestRun();
     await this.latestRun(); // same 404 as the default path when nothing has been simulated yet
-    const key = `${limit}|${qualKey}`;
+    const key = `${limit}|${qualKey}|${quarter?.label ?? ''}`;
     const busy = this.adhocRunning.get(key);
     if (busy) return busy;
-    const job = this.adhocRun(limit, qualKey).finally(() => this.adhocRunning.delete(key));
+    const job = this.adhocRun(limit, qualKey, quarter).finally(() => this.adhocRunning.delete(key));
     this.adhocRunning.set(key, job);
     return job;
   }
 
-  private async adhocRun(limitMinutes: number, qualKey: string): Promise<SimulationRun> {
+  private async adhocRun(limitMinutes: number, qualKey: string, quarter?: Quarter): Promise<SimulationRun> {
     const cutoff = nowEpoch() - ADHOC_TTL_SECONDS;
     await this.db.query(`DELETE FROM simulation_runs WHERE adhoc AND started_at < $1`, [cutoff]);
     const fresh = await this.db.getRepository(SimulationRun).findOne({
-      where: { status: RunStatus.COMPLETED, adhoc: true, limitMinutes, qualificationKey: qualKey || IsNull() },
+      where: {
+        status: RunStatus.COMPLETED,
+        adhoc: true,
+        limitMinutes,
+        qualificationKey: qualKey || IsNull(),
+        quarterStart: quarter ? quarter.start : IsNull(),
+      },
       order: { finishedAt: 'DESC' },
     });
     if (fresh) return fresh;
-    const inputs = qualKey ? await this.qualificationInputs(qualKey) : await this.loadInputs();
-    const current = this.engine(inputs.centers, this.travel, limitMinutes).run(inputs.current);
-    return this.persist(inputs, inputs.current, current, 'adhoc', { limitMinutes, qualification: inputs.qualification });
+    const inputs = qualKey ? await this.qualificationInputs(qualKey, quarter) : await this.loadInputs();
+    const reach = this.engine(inputs.centers, this.travel, limitMinutes).run(inputs.current);
+    let capacity: CapacityResult | undefined;
+    if (quarter) {
+      const centers = inputs.centers.map((c) => ({ ...c, slots: inputs.slots?.get(c.id) ?? 0 }));
+      capacity = new CapacityEngine(centers, {
+        limitMinutes,
+        searchKm: this.searchKm(limitMinutes),
+        travel: this.travel,
+      }).run(inputs.current);
+    }
+    return this.persist(
+      inputs,
+      inputs.current,
+      reach,
+      'adhoc',
+      { limitMinutes, qualification: inputs.qualification, quarter },
+      capacity,
+    );
   }
 
-  private async qualificationCatalog(inputs: Inputs) {
-    inputs.catalog ??= await this.demand.qualificationCatalog();
+  private async qualificationCatalog(inputs: Inputs, quarter?: Quarter) {
+    const catalogKey = quarter?.label ?? 'all';
+    if (inputs.catalogKey !== catalogKey || !inputs.catalog) {
+      inputs.catalog = await this.demand.qualificationCatalog(quarter && { start: quarter.start, end: quarter.end });
+      inputs.catalogKey = catalogKey;
+    }
     inputs.offers ??= await this.db.query(
       `SELECT center_id AS "centerId", qualification_id AS "qualificationId", qualification
          FROM center_qualifications WHERE accredited_until IS NULL OR accredited_until >= $1`,
       [nowEpoch()],
     );
-    return { catalog: inputs.catalog!, offers: inputs.offers! };
+    return { catalog: inputs.catalog, offers: inputs.offers };
   }
 
   /** The simulation inputs for one qualification: its candidates, and only the centers accredited for it. */
-  private async qualificationInputs(raw: string): Promise<Inputs> {
+  private async qualificationInputs(raw: string, quarter?: Quarter): Promise<Inputs> {
     const inputs = await this.loadInputs();
     const key = qualificationKey(raw);
-    const cached = inputs.byQualification?.get(key);
+    const cacheKey = `${key}|${quarter?.label ?? ''}`;
+    const cached = inputs.byQualification?.get(cacheKey);
     if (cached) return cached;
-    const { catalog, offers } = await this.qualificationCatalog(inputs);
+    const { catalog, offers } = await this.qualificationCatalog(inputs, quarter);
     const q = catalog.byKey.get(key);
     if (!q) throw new BadRequestException('Unknown qualification');
     const ids = new Set(offers.filter((o) => qualificationKey(o.qualification) === key || (o.qualificationId !== null && q.ids.has(o.qualificationId))).map((o) => o.centerId));
+    const slots = quarter
+      ? new Map<number, number>(
+          (
+            await this.db.query(
+              `SELECT center_id, sum(slots)::int AS slots
+                 FROM center_qualification_slots
+                WHERE month_start >= $1 AND month_start < $2 AND qualification_key = $3
+                GROUP BY center_id`,
+              [quarter.start, quarter.end, key],
+            )
+          ).map((r: { center_id: number; slots: number }) => [r.center_id, r.slots]),
+        )
+      : undefined;
     const derived: Inputs = {
       ...inputs,
       centers: inputs.centers.filter((c) => ids.has(c.id)),
       current: this.demand.qualificationGroups(catalog.cities, q),
       baselines: new Map(),
       qualification: { key, name: q.name },
+      slots,
+      quarter,
     };
-    (inputs.byQualification ??= new Map()).set(key, derived);
+    (inputs.byQualification ??= new Map()).set(cacheKey, derived);
     return derived;
   }
 
@@ -487,7 +576,9 @@ export class SimulationService {
    */
   async recommend(user: AuthUser, q: RecommendQueryDto): Promise<RecommendationsDto> {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const inputs = q.qualification ? await this.qualificationInputs(q.qualification) : await this.loadInputs();
+    const quarter = q.quarter ? parseQuarter(q.quarter) ?? undefined : undefined;
+    if (q.quarter && !quarter) throw new BadRequestException('quarter must look like 2026-Q4');
+    const inputs = q.qualification ? await this.qualificationInputs(q.qualification, quarter) : await this.loadInputs();
     const limitMinutes = q.limitMinutes ?? this.limits.limitMinutes;
     const base = this.baselineFor(inputs, limitMinutes);
     const inArea = (g: DemandGroup) =>

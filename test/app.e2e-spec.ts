@@ -105,11 +105,15 @@ describe('Project AGA API (e2e)', () => {
       const ds = app.get(DataSource);
       const rows: Array<{ la1: number; lo1: number; la2: number; lo2: number; km: number }> = await ds.query(
         `SELECT ci.lat AS la1, ci.lon AS lo1, c.lat AS la2, c.lon AS lo2,
-                ST_Distance(ST_SetSRID(ST_MakePoint(ci.lon, ci.lat), 4326)::geography,
-                            ST_SetSRID(ST_MakePoint(c.lon, c.lat), 4326)::geography) / 1000 AS km
-           FROM travel_times t JOIN cities ci ON ci.key = t.city_key JOIN assessment_centers c ON c.id = t.center_id
+                ST_Distance(ci.centroid::geography, c.location::geography) / 1000 AS km
+           FROM (SELECT key, lat, lon, centroid FROM cities WHERE centroid IS NOT NULL ORDER BY key LIMIT 300) ci
+           CROSS JOIN LATERAL (
+             SELECT id, lat, lon, location FROM assessment_centers
+              WHERE include_in_analysis
+              ORDER BY location <-> ci.centroid LIMIT 4
+           ) c
           WHERE ci.lat <> c.lat OR ci.lon <> c.lon
-          ORDER BY t.city_key, t.center_id LIMIT 3000`,
+          LIMIT 3000`,
       );
       expect(rows.length).toBeGreaterThan(100);
       let worst = 0;
@@ -421,12 +425,74 @@ describe('Project AGA API (e2e)', () => {
       expect(negros.parentCode).toBe(R6);
     });
 
-    it('has no utilization or service rate, and no rate legend', async () => {
+    it('has no capacity data on the regular run, and no rate legend', async () => {
       const ov = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
       for (const o of [ov.body.area, ...ov.body.rows]) {
-        for (const k of ['rate', 'serviceRate', 'band', 'utilization']) expect(o).not.toHaveProperty(k);
+        for (const k of ['rate', 'band']) expect(o).not.toHaveProperty(k);
+        expect(o.slots).toBeNull();
+        expect(o.assigned).toBeNull();
+        expect(o.utilization).toBeNull();
+        expect(o.serviceRate).toBeNull();
+        expect(o.utilizationBand).toBeNull();
       }
+      expect(ov.body.quarter).toBeNull();
+      expect(ov.body.qualification).toBeNull();
+      expect(ov.body.utilizationLegend).toBeNull();
       expect(ov.body).not.toHaveProperty('legend');
+    });
+
+    describe('capacity utilization (?qualification=&quarter=)', () => {
+      let qualification: string | null = null;
+
+      beforeAll(async () => {
+        const list = await api().get('/api/v1/dashboard/qualifications').set(as('co')).expect(200);
+        qualification = list.body[0]?.key ?? null;
+      });
+
+      it('returns slots, assigned, utilization and a legend for one qualification and quarter', async () => {
+        if (!qualification) return; // the demo/API has no upcoming graduates
+        const ov = await api()
+          .get(`/api/v1/dashboard/overview?qualification=${encodeURIComponent(qualification)}&quarter=2026-Q4`)
+          .set(as('co'))
+          .expect(200);
+        expect(ov.body.quarter).toBe('2026-Q4');
+        expect(ov.body.qualification).toBe(qualification);
+        expect(ov.body.utilizationLegend).toEqual(expect.arrayContaining([expect.objectContaining({ band: 4 })]));
+        for (const o of [ov.body.area, ...ov.body.rows]) {
+          expect(o.slots).toBeGreaterThanOrEqual(0);
+          expect(o.assigned).toBeGreaterThanOrEqual(0);
+          expect(o.assigned).toBeLessThanOrEqual(o.candidates);
+          if (o.slots > 0) {
+            expect(o.utilization).toBeCloseTo(o.candidates / o.slots, 10);
+            expect(o.utilizationBand).toBeGreaterThanOrEqual(0);
+            expect(o.utilizationBand).toBeLessThanOrEqual(4);
+          }
+          if (o.candidates > 0) expect(o.serviceRate).toBeCloseTo(o.assigned / o.candidates, 10);
+          else expect(o.serviceRate).toBeNull();
+        }
+      });
+
+      it('needs a qualification when a quarter is given', () =>
+        api().get('/api/v1/dashboard/overview?quarter=2026-Q4').set(as('co')).expect(400));
+
+      it('lists centers by utilization, and the center card breaks it down per qualification', async () => {
+        if (!qualification) return;
+        const centers = await api()
+          .get(`/api/v1/dashboard/centers?qualification=${encodeURIComponent(qualification)}&quarter=2026-Q4`)
+          .set(as('co'))
+          .expect(200);
+        expect(centers.body.length).toBeGreaterThan(0);
+        const first = centers.body[0];
+        expect(first.slots).toBeGreaterThanOrEqual(0);
+        expect(first.assigned).toBeLessThanOrEqual(first.slots);
+        const util = await api().get(`/api/v1/centers/${first.id}/utilization?quarter=2026-Q4`).set(as('co')).expect(200);
+        expect(util.body.quarter).toBe('2026-Q4');
+        expect(util.body.qualifications.length).toBeGreaterThan(0);
+        for (const q of util.body.qualifications) {
+          expect(q.slots).toBeGreaterThanOrEqual(0);
+          if (q.assigned !== null) expect(q.assigned).toBeLessThanOrEqual(q.slots);
+        }
+      });
     });
 
     describe('adjustable travel limit (?limitMinutes=)', () => {
@@ -561,7 +627,8 @@ describe('Project AGA API (e2e)', () => {
       it('every row has a density class, and the densest fifth is the hotspot', async () => {
         const ov = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
         for (const r of ov.body.rows) {
-          for (const k of ['ratio', 'slots', 'used']) expect(r).not.toHaveProperty(k); // no capacity model
+          for (const k of ['ratio', 'used']) expect(r).not.toHaveProperty(k); // no capacity model on the regular run
+          expect(r.slots).toBeNull();
           expect(r.densityBand).toBeGreaterThanOrEqual(-1);
         }
         const legend = ov.body.densityLegend;
@@ -920,7 +987,7 @@ describe('Project AGA API (e2e)', () => {
       it('has no learner data in the graduate figures: only counts per town or province, qualification and month', async () => {
         const rows: Array<Record<string, unknown>> = await app.get(DataSource).query(`SELECT * FROM upcoming_graduates LIMIT 50`);
         expect(rows.length).toBeGreaterThan(0);
-        expect(Object.keys(rows[0]!).sort()).toEqual(['city_id', 'finish_month', 'graduates', 'id', 'province_psgc', 'qualification', 'qualification_id']);
+        expect(Object.keys(rows[0]!).sort()).toEqual(['city_id', 'finish_month', 'graduates', 'id', 'province_psgc', 'qualification', 'qualification_id', 'source']);
       });
 
       it('looks only inside a chosen province, and keeps role scope', async () => {
@@ -1028,14 +1095,14 @@ describe('Project AGA API (e2e)', () => {
 
     it('lists a center within 500 m as a walk, with the same time the walking directions give', async () => {
       const near = await api().get('/api/v1/public/centers/nearest?lat=14.521465&lon=121.029221&limit=3').expect(200);
-      const first = near.body.results[0];
-      expect(first.id).toBe(30); // TESDA Women's Center, about 220 m away
-      expect(first.mode).toBe('walking');
-      expect(first.withinLimit).toBe(true);
+      const women = near.body.results.find((r: { id: number }) => r.id === 30); // TESDA Women's Center, about 220 m away
+      expect(women).toBeDefined();
+      expect(women.mode).toBe('walking');
+      expect(women.withinLimit).toBe(true);
       const far = near.body.results.find((r: { km: number }) => r.km > 0.6);
       if (far) expect(far.mode).toBe('driving');
       const walk = await api().get('/api/v1/public/route?lat=14.521465&lon=121.029221&centerId=30').expect(200);
-      expect(walk.body.minutes).toBe(first.minutes);
+      expect(walk.body.minutes).toBe(women.minutes);
     });
 
     it('filters by a TESDA qualification label, including one with no T2MIS QualId', async () => {

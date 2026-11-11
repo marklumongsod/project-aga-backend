@@ -15,7 +15,7 @@ One web app with two faces:
    - **RO**, Regional Office: one region
    - **PO**, Provincial Office: one province
 
-   It shows which cities have no assessment center within reach ("assessment deserts"), how many candidates are flagged because of that, and lets offices drop a proposed new center on the map to see which deserts it closes. The travel limit (90 minutes by default) can be changed from the dashboard. There is no capacity model: center slots are not counted.
+   It shows which cities have no assessment center within reach ("assessment deserts"), how many candidates are flagged because of that, and lets offices drop a proposed new center on the map to see which deserts it closes. The travel limit (90 minutes by default) can be changed from the dashboard. The regular view does not count slots; a separate capacity view (`?qualification=&quarter=`) shows utilization per center and qualification.
 2. **Public Assessment Center Finder** (no sign-in) for learners. They search their city or use their current location, filter by qualification and area, and get the nearest assessment centers by travel time.
 
 There are **no other roles**. Don't build user management or registration. Accounts come from T2MIS.
@@ -160,7 +160,7 @@ All parameters are optional. Omit them to get the user's home area. `level` is `
 Rules:
 - **`parentCode`** is what an area sits in (a province's region, a city's province; `null` for a region or the country). Use it to fill the Region and Province pickers and the back buttons when the link has no `?region=`.
 - **Shares are fractions** (`0.161` = 16.1%). `flaggedShare` always shows one decimal. `centers: 0` means the area has no center of its own → show "No center" (PO Top 3 "Status" column).
-- **There is no utilization rate, service rate, slot count, "centers full" or candidates-to-slots ratio** anywhere in the API. Don't build them.
+- **Capacity utilization:** add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard, map and centers calls. The area/rows then include `slots`, `assigned`, `utilization` (candidates ÷ slots, can exceed 1) and `serviceRate` (assigned ÷ candidates); `utilizationBand` maps to `utilizationLegend` (green → red, text labels included). `/centers/:id/utilization?quarter=` returns every qualification the center offers with slots, candidates, assigned and utilization. The regular calls have these fields as `null`. Demo slots are 20 per program per center per month; real TESDA/NCR slots replace them.
 - Every `limitMinutes` request (`?limitMinutes=`, 10 to 180) returns the same shape; `run.assumptions.limitMinutes` is the limit that was used. Anything outside 10 to 300, or not a whole number, is `400`.
 - Flagged candidates are exactly the candidates in desert cities (no center in reach), so `flagged` equals `desertCandidates` at every level.
 - `top` is already Top 5 regions (national) or Top 3 provinces/cities (region/province), worst first. Don't re-rank. Read each item's `level` for the title.
@@ -497,5 +497,5 @@ Built on top of §1-§14 and covered by the browser tests. Expected values in th
 10. **Basemap**: the dashboard, planner and finder maps sit on a full-colour OpenStreetMap basemap (OpenFreeMap "liberty": blue sea, green forest and grass, roads and place names), with the blue and green deepened a little in `baseStyle.ts`. The area colours are laid over the land, forest and parks but **under** the rivers, lakes, roads, buildings, boundaries and place names, so that detail stays visible on red. Areas in the "not a desert" class are left unpainted so the real map shows through; the density view paints every class. If the basemap can't load, a plain ocean-blue background is used. The map credit (OpenStreetMap, OpenFreeMap, OpenMapTiles) is required by their licences and must stay on every map; it starts collapsed behind the small "i" button (`collapseAttribution` in `map/setup.ts`) and opens on a click.
 11. **No selected-area chip.** Picking an area highlights its row in the table and on the map; nothing extra is shown in the map header.
 12. **Number formats** follow §12: flagged shares always have one decimal.
-13. **Utilization and service rate removed**: the utilization rate, then the service rate, were removed from the API and the UI. So were slots, "centers full" and the candidates-to-slots ratio. Don't reintroduce them without asking the backend team.
+13. **Capacity utilization added**: use the `qualification` + `quarter` filters and `utilizationLegend`. Utilization is candidates ÷ slots (can exceed 100%); `serviceRate` is assigned ÷ candidates. Slots are monthly (demo: 20 per program per center per month). The regular reach view remains unchanged.
 

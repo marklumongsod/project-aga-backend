@@ -32,6 +32,7 @@
     "travel:build:prod": "node dist/cli/build-travel-matrix.js",
     "qa:travel": "ts-node --transpile-only src/cli/travel-spotcheck.ts",
     "data:quality": "ts-node --transpile-only src/cli/data-quality.ts",
+    "demo:utilization": "ts-node --transpile-only src/cli/demo-utilization.ts",
     "data:quality:prod": "node dist/cli/data-quality.js"
   },
   "dependencies": {

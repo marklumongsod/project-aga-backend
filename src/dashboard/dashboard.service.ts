@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { AuthUser } from '../common/auth.decorators';
 import { densityBand, densityBreaks, densityLegend } from '../common/density';
 import { DESERT_LEVELS, toEpoch } from '../common/rate-band';
+import { UTILIZATION_LEVELS, utilizationBand } from '../common/utilization';
 import { AreaLevel, Role } from '../database/entities';
 import { AreaRef, AreaScopeService } from '../scope/area-scope.service';
 import { SimulationService } from '../simulation/simulation.service';
@@ -18,6 +19,10 @@ interface AreaRow {
   flagged: number;
   centers: number;
   flagged_share: number;
+  slots: number | null;
+  assigned: number | null;
+  utilization: number | null;
+  service_rate: number | null;
   desert_level: number;
   desert_cities: number;
   desert_candidates: number;
@@ -51,6 +56,11 @@ function worstFirst(a: AreaStatsDto, b: AreaStatsDto) {
     b.flagged - a.flagged ||
     a.name.localeCompare(b.name)
   );
+}
+
+/** Capacity view: highest utilization first, then candidates, then name. */
+function byUtilization(a: AreaStatsDto, b: AreaStatsDto) {
+  return (b.utilization ?? -1) - (a.utilization ?? -1) || b.candidates - a.candidates || a.name.localeCompare(b.name);
 }
 
 @Injectable()
@@ -117,6 +127,11 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
       candidates: r.candidates,
       flagged: r.flagged,
       flaggedShare: r.flagged_share,
+      slots: r.slots,
+      assigned: r.assigned,
+      utilization: r.utilization,
+      serviceRate: r.service_rate,
+      utilizationBand: r.slots == null ? null : utilizationBand(r.utilization),
       centers: r.centers,
       densityBand: 0, // set against the siblings in childRows
       desertLevel: r.desert_level ?? 0,
@@ -169,7 +184,7 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
   }
 
   /** Area rows of a run for the children of `area` (regions of PH, provinces of a region, cities of a province). */
-  async childRows(runId: string, area: AreaRef): Promise<AreaStatsDto[]> {
+  async childRows(runId: string, area: AreaRef, capacity = false): Promise<AreaStatsDto[]> {
     const child = this.childLevel(area.level);
     const params: unknown[] = [runId, child];
     let filter = '';
@@ -182,6 +197,7 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
     }
     const rows: AreaRow[] = await this.db.query(
       `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.centers, a.flagged_share,
+              a.slots, a.assigned, a.utilization, a.service_rate,
               a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates, a.nearest_minutes
          FROM area_utilization a ${JOINS}
         WHERE a.run_id = $1 AND a.level = $2 ${filter}`,
@@ -189,16 +205,17 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
     );
     const sorted = rows
       .map((r) => this.toDto(r))
-      .sort(worstFirst)
+      .sort(capacity ? byUtilization : worstFirst)
       .map((r, i) => ({ ...r, rank: i + 1 }));
     return this.withDensity(sorted).rows;
   }
 
   async overview(user: AuthUser, q: DashboardQueryDto): Promise<OverviewDto> {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const run = await this.sim.runFor(q.limitMinutes, q.qualification);
+    const run = await this.sim.runFor(q.limitMinutes, q.qualification, q.quarter);
     const [self]: AreaRow[] = await this.db.query(
       `SELECT a.level, a.area_key, a.parent_key, ${NAME_SQL} AS name, a.candidates, a.flagged, a.centers, a.flagged_share,
+              a.slots, a.assigned, a.utilization, a.service_rate,
               a.desert_level, a.desert_cities, a.desert_candidates, a.estimated_candidates, a.nearest_minutes
          FROM area_utilization a ${JOINS} WHERE a.run_id = $1 AND a.level = $2 AND a.area_key = $3`,
       [run.id, area.level, area.code],
@@ -213,6 +230,11 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
           candidates: 0,
           flagged: 0,
           flaggedShare: 0,
+          slots: null,
+          assigned: null,
+          utilization: null,
+          serviceRate: null,
+          utilizationBand: null,
           centers: 0,
           densityBand: 0,
           desertLevel: 0,
@@ -222,9 +244,12 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
           nearestMinutes: null,
         };
 
-    const rows = await this.childRows(run.id, area);
+    const capacity = !!(q.qualification && q.quarter);
+    const rows = await this.childRows(run.id, area, capacity);
     return {
       run: { id: run.id, finishedAt: toEpoch(run.finishedAt), assumptions: run.summary?.assumptions ?? {} },
+      quarter: q.quarter ?? null,
+      qualification: q.qualification ?? null,
       area: stats,
       childLevel: this.childLevel(area.level),
       // only areas with flagged candidates need attention; an area with none is never listed
@@ -233,14 +258,16 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
       deserts: await this.desertSummary(run.id, area),
       desertLegend: DESERT_LEVELS,
       densityLegend: this.withDensity(rows).legend,
+      utilizationLegend: capacity ? UTILIZATION_LEVELS : null,
     };
   }
 
   /** Choropleth for the map: the children of the area as GeoJSON with candidates, flagged share, desert level and density class. */
   async map(user: AuthUser, q: DashboardQueryDto) {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const run = await this.sim.runFor(q.limitMinutes, q.qualification);
-    const rows = new Map((await this.childRows(run.id, area)).map((r) => [r.code, r]));
+    const run = await this.sim.runFor(q.limitMinutes, q.qualification, q.quarter);
+    const capacity = !!(q.qualification && q.quarter);
+    const rows = new Map((await this.childRows(run.id, area, capacity)).map((r) => [r.code, r]));
     const child = this.childLevel(area.level);
     const tol = area.level === AreaLevel.NATIONAL ? 0.004 : area.level === AreaLevel.REGION ? 0.002 : 0.0007;
     const geo: Array<{ code: string; name: string; geometry: string }> =
@@ -268,6 +295,7 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
         runId: run.id,
         desertLegend: DESERT_LEVELS,
         densityLegend: this.withDensity([...rows.values()]).legend,
+        utilizationLegend: capacity ? UTILIZATION_LEVELS : null,
       },
       features: geo.map((g) => {
         const s = rows.get(g.code);
@@ -282,6 +310,11 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
             candidates: 0,
             flagged: 0,
             flaggedShare: 0,
+            slots: null,
+            assigned: null,
+            utilization: null,
+            serviceRate: null,
+            utilizationBand: null,
             centers: 0,
             densityBand: -1,
             desertLevel: 0,
@@ -301,7 +334,7 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
    */
   async deserts(user: AuthUser, q: DashboardQueryDto) {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const run = await this.sim.runFor(q.limitMinutes, q.qualification);
+    const run = await this.sim.runFor(q.limitMinutes, q.qualification, q.quarter);
     const params: unknown[] = [run.id, area.level === AreaLevel.NATIONAL ? 0.002 : 0.001];
     let join = '';
     let filter = '';
@@ -342,7 +375,7 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
    */
   async heat(user: AuthUser, q: DashboardQueryDto) {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const run = await this.sim.runFor(q.limitMinutes, q.qualification);
+    const run = await this.sim.runFor(q.limitMinutes, q.qualification, q.quarter);
     // the points depend only on the run and the area (seeded), and the country view takes ~2 s to build: keep the latest few
     const key = `${run.id}|${area.level}|${area.code}`;
     const hit = this.heatCache.get(key);
@@ -405,20 +438,21 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
   /** Assessment centers in the area with predicted candidates (hover card). */
   async centers(user: AuthUser, q: DashboardQueryDto) {
     const area = await this.scope.resolve(user, q.level, q.code);
-    const run = await this.sim.runFor(q.limitMinutes, q.qualification);
+    const run = await this.sim.runFor(q.limitMinutes, q.qualification, q.quarter);
     const filter =
       area.level === AreaLevel.NATIONAL
         ? ''
         : area.level === AreaLevel.REGION
           ? 'AND c.region_psgc = $2'
           : 'AND c.province_psgc = $2';
+    const capacity = !!(q.qualification && q.quarter);
     const rows = await this.db.query(
-      `SELECT c.id, c.name, c.lat, c.lon, ci.name AS city, u.demand
+      `SELECT c.id, c.name, c.lat, c.lon, ci.name AS city, u.demand, u.slots, u.assigned, u.utilization, u.service_rate
          FROM center_utilization u
          JOIN assessment_centers c ON c.id = u.center_id
          LEFT JOIN cities ci ON ci.id = c.city_id
         WHERE u.run_id = $1 ${filter}
-        ORDER BY u.demand DESC`,
+        ORDER BY ${capacity ? 'u.utilization DESC NULLS LAST, u.demand DESC' : 'u.demand DESC'}`,
       area.level === AreaLevel.NATIONAL ? [run.id] : [run.id, area.code],
     );
     return rows.map((r: Record<string, number | string | null>) => ({
@@ -429,6 +463,11 @@ export class DashboardService implements OnApplicationBootstrap, OnModuleDestroy
       lon: r.lon,
       /** TESDA only: candidates who would go to this center first */
       predictedCandidates: r.demand,
+      /** capacity fields, only on a qualification + quarter run */
+      slots: r.slots,
+      assigned: r.assigned,
+      utilization: r.utilization,
+      serviceRate: r.service_rate,
     }));
   }
 }

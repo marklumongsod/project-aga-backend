@@ -2,6 +2,7 @@ import { City, Province, Region } from './geography.entity';
 import {
   AssessmentCenter,
   CenterQualification,
+  CenterQualificationSlot,
   Qualification,
   TesdaSync,
   UpcomingGraduates,
@@ -26,6 +27,7 @@ export const ENTITIES = [
   Qualification,
   AssessmentCenter,
   CenterQualification,
+  CenterQualificationSlot,
   UpcomingGraduates,
   TesdaSync,
   BsrsStat,
