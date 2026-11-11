@@ -74,8 +74,8 @@ export class AreaStatsDto {
   /** candidates living in those desert cities */
   desertCandidates: number;
   /**
-   * Candidates in this area that are an even share of a larger total (BSRS has a count for only some cities), not a
-   * count. Compare with `candidates`: equal means the whole figure is an estimate.
+   * Cities: the part of `candidates` that is a share of graduates the TESDA API places only in the province (split over
+   * its towns), not graduates placed in this town. 0 for provinces, regions and the country, which count every graduate.
    */
   estimatedCandidates: number;
   /** cities: minutes to the nearest reachable center, null = none within the travel limits */

@@ -6,6 +6,8 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
+  ValidateIf,
   Max,
   Min,
   MinLength,
@@ -61,17 +63,38 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   JWT_EXPIRES_IN = '8h';
 
-  @IsOptional()
-  @IsString()
+  /** T2MIS SSO (SSOPortal / OpenIddict) authority, e.g. https://sso.tesda.gov.ph. Empty = SSO off (501). */
+  @ValidateIf((o: EnvironmentVariables) => !!o.T2MIS_SSO_ISSUER)
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true })
   T2MIS_SSO_ISSUER?: string;
 
-  @IsOptional()
+  @ValidateIf((o: EnvironmentVariables) => !!o.T2MIS_SSO_ISSUER)
   @IsString()
+  @IsNotEmpty()
   T2MIS_SSO_CLIENT_ID?: string;
 
+  /** Confidential client secret; sent to the token endpoint (client_secret_post). Optional for a public PKCE client. */
   @IsOptional()
   @IsString()
   T2MIS_SSO_CLIENT_SECRET?: string;
+
+  /** The frontend URL SSOPortal sends the user back to (must be registered on the SSO client). */
+  @ValidateIf((o: EnvironmentVariables) => !!o.T2MIS_SSO_ISSUER)
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true })
+  T2MIS_SSO_REDIRECT_URI?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  T2MIS_SSO_SCOPES = 'openid profile roles';
+
+  /**
+   * SSO role -> AGA role, comma-separated `SsoRole=Target`. Target CO, RO, PO or AUTO
+   * (AUTO = PO when the account's ProvinceId resolves, else RO by RegionId). SSO roles not listed are refused.
+   */
+  @Matches(/^\s*[\w .-]+\s*=\s*(CO|RO|PO|AUTO)\s*(,\s*[\w .-]+\s*=\s*(CO|RO|PO|AUTO)\s*)*$/i, {
+    message: 'T2MIS_SSO_ROLE_MAP must look like CAD=CO,SU=CO,Admin=CO,RO=AUTO (targets CO, RO, PO, AUTO)',
+  })
+  T2MIS_SSO_ROLE_MAP = 'CAD=CO,SU=CO,Admin=CO,RO=AUTO';
 
   @Transform(toInt)
   @IsInt()
@@ -92,6 +115,10 @@ export class EnvironmentVariables {
 
   @IsString()
   SIM_CRON = '0 2 * * *';
+
+  /** When to pull from the TESDA API (Asia/Manila). Monthly: 01:45 on the 1st, after TESDA's ~01:30 recalculation. */
+  @IsString()
+  TESDA_SYNC_CRON = '45 1 1 * *';
 
   /** estimate = straight line x detour / speed (+ ferry). osrm = real road + ferry times from OSRM (OpenStreetMap). */
   @IsEnum(TravelMode)

@@ -6,25 +6,28 @@ describe('isoBand', () => {
   });
 });
 
-describe('desertLevel (team doc: assessment desert levels by enrollee-candidates)', () => {
+describe('desertLevel (assessment desert levels by candidates, scaled to the upcoming graduates)', () => {
   it.each([
     [0, 0],
     [-3, 0],
     [1, 1],
-    [200, 1],
-    [201, 2],
-    [400, 2],
-    [401, 3],
-    [600, 3],
-    [601, 4],
-    [4525, 4],
+    [20, 1],
+    [21, 2],
+    [40, 2],
+    [41, 3],
+    [60, 3],
+    [61, 4],
+    [2154, 4],
   ])('%i candidates -> level %i', (candidates, level) => {
     expect(desertLevel(candidates)).toBe(level);
   });
 
-  it('has a legend entry for every level, from "not a desert" to level 4', () => {
+  it('has a legend entry for every level, from "not a desert" to level 4, matching the bands', () => {
     expect(DESERT_LEVELS.map((l) => l.band)).toEqual([0, 1, 2, 3, 4]);
-    expect(DESERT_LEVELS[4]!.label).toContain('601 candidates and up');
+    expect(DESERT_LEVELS[1]!.label).toContain('1-20 candidates');
+    expect(DESERT_LEVELS[2]!.label).toContain('21-40 candidates');
+    expect(DESERT_LEVELS[3]!.label).toContain('41-60 candidates');
+    expect(DESERT_LEVELS[4]!.label).toContain('61 candidates and up');
   });
 });
 

@@ -4,14 +4,16 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { StringValue } from 'ms';
-import { User } from '../database/entities';
+import { Province, Region, User } from '../database/entities';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
+import { T2misOidcClient } from './t2mis/t2mis-oidc.client';
+import { T2misSsoService } from './t2mis/t2mis-sso.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Region, Province]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
@@ -25,6 +27,6 @@ import { JwtStrategy } from './jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, T2misOidcClient, T2misSsoService],
 })
 export class AuthModule {}

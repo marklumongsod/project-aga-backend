@@ -15,6 +15,7 @@ import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point } from '@turf/helpers';
 import { DataSource } from 'typeorm';
 import { EPSG_WGS84, haversineKm } from '../src/common/geo/haversine';
+import { DESERT_LEVELS, desertLevel } from '../src/common/rate-band';
 
 const PW = process.env.SEED_DEMO_PASSWORD ?? '';
 const R6 = '0600000000';
@@ -240,11 +241,15 @@ describe('Project AGA API (e2e)', () => {
       expect(JSON.stringify(r.body.message)).toContain('should not exist');
       const ok = await post('po', SIPALAY).expect(201);
       expect(ok.body).toMatchObject({ name: TAG, cityName: 'City of Sipalay', areaCode: NEGROS_OCC, status: 'SAVED', mine: true });
-      expect(ok.body.result.newlyServed).toBeGreaterThan(0);
       expect(ok.body.newlyServed).toBe(ok.body.result.newlyServed);
       expect(ok.body.desertCitiesClosed).toBe(ok.body.result.area.desertCitiesBefore - ok.body.result.area.desertCitiesAfter);
       expect(ok.body.createdAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
       for (const k of ['slots', 'slotsPerQuarter']) expect(ok.body.result).not.toHaveProperty(k);
+      // a pin where the data has a desert (the best recommended site) serves new candidates, and the saved copy says so
+      const best = (await api().get('/api/v1/simulation/recommendations').set(as('co')).expect(200)).body.sites[0];
+      const atDesert = await post('co', { lat: best.lat, lon: best.lon }).expect(201);
+      expect(atDesert.body.newlyServed).toBeGreaterThan(0);
+      expect(atDesert.body.newlyServed).toBe(atDesert.body.result.newlyServed);
     });
 
     it('uses the same checks as the what-if: a pin outside the office area or the chosen area is refused', async () => {
@@ -320,8 +325,14 @@ describe('Project AGA API (e2e)', () => {
     it('rejects unknown fields (no mass assignment)', () =>
       api().post('/api/v1/auth/login').send({ email: 'a@b.co', password: 'x', role: 'CO' }).expect(400));
 
-    it('T2MIS SSO answers 501 until configured', () =>
-      api().post('/api/v1/auth/sso/t2mis').send({ idToken: 'x' }).expect(501));
+    it('T2MIS SSO answers 501 until configured', async () => {
+      if (process.env.T2MIS_SSO_ISSUER) return; // configured in this environment; test/sso.e2e-spec.ts covers it
+      await api().get('/api/v1/auth/sso/t2mis').expect(501);
+      await api()
+        .post('/api/v1/auth/sso/t2mis')
+        .send({ code: 'x', codeVerifier: 'v'.repeat(43) })
+        .expect(501);
+    });
 
     it('returns the signed-in user and scope', () =>
       api()
@@ -358,7 +369,7 @@ describe('Project AGA API (e2e)', () => {
           for (const t of r.body.top) expect(t.level).toBe('REGION');
           expect(r.body.rows).toHaveLength(17);
           expect(r.body.rows.every((x: { level: string }) => x.level === 'REGION')).toBe(true);
-          expect(r.body.area.candidates).toBeGreaterThan(1_000_000);
+          expect(r.body.area.candidates).toBeGreaterThan(0);
           for (const k of ['period', 'otherPeriod']) expect(r.body).not.toHaveProperty(k); // no next-quarter view
         }));
 
@@ -532,7 +543,7 @@ describe('Project AGA API (e2e)', () => {
         expect(d.cities).toBeGreaterThan(0); // the seeded country has islands no center can reach
         expect(ov.body.area.desertCities).toBe(d.cities);
         expect(ov.body.desertLegend.map((l: { band: number }) => l.band)).toEqual([0, 1, 2, 3, 4]);
-        expect(ov.body.desertLegend[4].label).toContain('601 candidates and up');
+        expect(ov.body.desertLegend.map((l: { label: string }) => l.label)).toEqual(DESERT_LEVELS.map((l) => l.label));
       });
 
       it('a province lists its own desert cities with levels that follow the candidate counts', async () => {
@@ -546,8 +557,7 @@ describe('Project AGA API (e2e)', () => {
         const deserts = ov.body.rows.filter((r: { desertLevel: number }) => r.desertLevel > 0);
         expect(deserts.length).toBe(ov.body.deserts.cities);
         for (const c of deserts) {
-          const lvl = c.candidates <= 200 ? 1 : c.candidates <= 400 ? 2 : c.candidates <= 600 ? 3 : 4;
-          expect(c.desertLevel).toBe(lvl);
+          expect(c.desertLevel).toBe(desertLevel(c.candidates));
           expect(c.nearestMinutes).toBeNull(); // no center within the travel range
         }
         // deserts come first in the list, most candidates first
@@ -585,13 +595,22 @@ describe('Project AGA API (e2e)', () => {
         for (const k of ['desertLevel', 'densityBand', 'desertCities']) expect(f).toHaveProperty(k);
       });
 
-      it('marks city candidate counts that are an even share of a province total, but not the measured province total', async () => {
-        const po = await api().get('/api/v1/dashboard/overview').set(as('po')).expect(200);
-        const est = po.body.rows.filter((r: { estimatedCandidates: number }) => r.estimatedCandidates > 0);
-        expect(est.length).toBeGreaterThan(0);
-        for (const r of po.body.rows) expect(r.estimatedCandidates === 0 || r.estimatedCandidates === r.candidates).toBe(true);
-        const co = await api().get('/api/v1/dashboard/overview').set(as('co')).expect(200);
-        for (const r of co.body.rows) expect(r.estimatedCandidates).toBe(0); // provinces: BSRS totals, measured
+      it('marks the part of a town figure that is split from province-only graduates, but not the province total', async () => {
+        type Row = { candidates: number; estimatedCandidates: number };
+        // a province where the TESDA API places some graduates only in the province, not in a town
+        const [prov]: Array<{ province_psgc: string; region_psgc: string }> = await app.get(DataSource).query(
+          `SELECT g.province_psgc, p.region_psgc FROM upcoming_graduates g JOIN provinces p ON p.psgc = g.province_psgc
+            WHERE g.city_id IS NULL GROUP BY 1, 2 ORDER BY sum(g.graduates) DESC LIMIT 1`,
+        );
+        expect(prov).toBeDefined();
+        const towns = await api().get(`/api/v1/dashboard/overview?level=PROVINCE&code=${prov!.province_psgc}`).set(as('co')).expect(200);
+        expect(towns.body.rows.some((r: Row) => r.estimatedCandidates > 0)).toBe(true);
+        for (const r of towns.body.rows as Row[]) {
+          expect(r.estimatedCandidates).toBeGreaterThanOrEqual(0);
+          expect(r.estimatedCandidates).toBeLessThanOrEqual(r.candidates); // only part of a town can be split
+        }
+        const provinces = await api().get(`/api/v1/dashboard/overview?level=REGION&code=${prov!.region_psgc}`).set(as('co')).expect(200);
+        for (const r of provinces.body.rows as Row[]) expect(r.estimatedCandidates).toBe(0); // provinces count every graduate
       });
 
       it('RO cannot read the deserts of a region outside theirs', () =>
@@ -898,7 +917,7 @@ describe('Project AGA API (e2e)', () => {
       });
 
       it('says which qualifications each site should offer, from the graduates of the provinces it serves', async () => {
-        const r = await get('co', `?level=PROVINCE&code=${NEGROS_OCC}&count=3`).expect(200);
+        const r = await get('co', '?count=3').expect(200);
         expect(r.body.qualificationSource).toContain('graduate');
         const sites = r.body.sites as Array<{ topQualifications: Array<{ qualification: string; estimatedCandidates: number; share: number; centersOffering: number }>; newlyServed: number }>;
         expect(sites.length).toBeGreaterThan(0);
@@ -1056,6 +1075,35 @@ describe('Project AGA API (e2e)', () => {
       for (const c of r.body.results) expect(c.qualifications).toContain(pick.label);
       expect(r.body.programData.centersWithProgramData).toBeGreaterThan(0);
       await api().get('/api/v1/public/centers/nearest?lat=14.5995&lon=120.9842&qualificationId=1').expect(400);
+    });
+
+    it('gives road distance alongside road time, and says when it fell back to a straight line', async () => {
+      const r = await api().get('/api/v1/public/centers/nearest?lat=14.8433&lon=120.8114&limit=5').expect(200);
+      for (const c of r.body.results) {
+        expect(['road', 'straight-line']).toContain(c.kmBy);
+        expect(c.km).toBeGreaterThanOrEqual(0);
+      }
+      expect(r.body.beyondSearchRadius).toBe(false);
+    });
+
+    it('still shows the nearest matching center when none is within the search radius', async () => {
+      // A qualification whose closest accredited center is more than 160 km from Manila.
+      const [far] = await app.get(DataSource).query(
+        `SELECT cq.qualification
+           FROM center_qualifications cq JOIN assessment_centers c ON c.id = cq.center_id AND c.include_in_analysis
+          GROUP BY cq.qualification
+         HAVING min(ST_Distance(c.location::geography, ST_SetSRID(ST_MakePoint(120.9842, 14.5995), 4326)::geography)) > 160000
+          LIMIT 1`,
+      );
+      if (!far) return; // every qualification is offered near Manila in this data set
+      const r = await api()
+        .get(`/api/v1/public/centers/nearest?lat=14.5995&lon=120.9842&limit=3&qualification=${encodeURIComponent(far.qualification)}`)
+        .expect(200);
+      expect(r.body.beyondSearchRadius).toBe(true);
+      expect(r.body.desert).toBe(true);
+      expect(r.body.results.length).toBeGreaterThan(0);
+      expect(r.body.results[0].withinLimit).toBe(false);
+      expect(r.body.results[0].minutes).toBeGreaterThan(0);
     });
 
     it('lists only centers the TESDA API lists', async () => {

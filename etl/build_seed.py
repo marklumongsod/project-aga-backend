@@ -101,7 +101,7 @@ for fn in glob.glob(os.path.join(GEO, 'municities', '*.json')):
 # Highly urbanized / independent cities are missing from the 2023 municity files.
 # They are the parts of a region polygon not covered by any province; name each part
 # from a reference point. PSGC code left null (not guessed); province = the province
-# the city is geographically inside or next to (used to split province-level BSRS).
+# the city is geographically inside or next to.
 HUC_POINTS = [
     ('City of Baguio', 16.4120, 120.5960), ('City of Angeles', 15.1450, 120.5887), ('City of Olongapo', 14.8292, 120.2828),
     ('City of Lucena', 13.9373, 121.6170), ('City of Puerto Princesa', 9.7392, 118.7353), ('City of Iloilo', 10.7202, 122.5621),
@@ -228,82 +228,4 @@ corrections = [c for c in centers if c['coordStatus'] in CORRECTED]
 dump('center_corrections.json', corrections)
 print(f"  corrected center positions: {len(corrections)} of {len(centers)} centers", file=sys.stderr)
 
-# ---------------------------------------------------------------- BSRS
-print('bsrs', file=sys.stderr)
-REG_ALIAS = {
-    'regioni': '0100000000', 'regionii': '0200000000', 'regioniii': '0300000000', 'regioniva': '0400000000', 'regionv': '0500000000',
-    'regionvi': '0600000000', 'regionvii': '0700000000', 'regionviii': '0800000000', 'regionix': '0900000000', 'regionx': '1000000000',
-    'regionxi': '1100000000', 'regionxii': '1200000000', 'nationalcapitalregion': '1300000000', 'cordilleraadministrativeregion': '1400000000',
-    'regionxiii': '1600000000', 'regionivb': '1700000000', 'bangsamoro': '1900000000', 'autonomousregioninmuslimmindanao': '1900000000',
-}
-
-
-def region_code(name):
-    n = norm(name)
-    if n.startswith('bangsamoro'):
-        return '1900000000'
-    if n.startswith('autonomousregion'):
-        return '1900000000'
-    for k in sorted(REG_ALIAS, key=len, reverse=True):
-        if n.startswith(k):
-            return REG_ALIAS[k]
-    return None
-
-
-PROV_ALIAS = {'compostelavalley': 'davaodeoro', 'northcotabato': 'cotabato', 'maguindanao': 'maguindanaodelnorte'}
-prov_by = collections.defaultdict(list)
-for k, v in provinces.items():
-    prov_by[norm(v['name'])].append(k)
-NCR_DISTRICTS = {'camanava': ['caloocan', 'malabon', 'navotas', 'valenzuela'],
-                 'muntiparlastapat': ['muntinlupa', 'paranaque', 'laspinas', 'taguig', 'pateros'],
-                 'pamamarisan': ['pasig', 'marikina', 'mandaluyong', 'sanjuan'], 'pasmak': ['pasay', 'makati'],
-                 'quezon': ['quezon'], 'manila': ['manila']}
-
-stats = []
-for r in sheet('BSRS Scholarship Data Per Regio'):
-    if r.get('enrolled_count') is None:
-        continue
-    stats.append(dict(level='REGION', sourceName=r['region'], regionPsgc=region_code(r['region']), provincePsgc=None, cityKey=None,
-                      cityKeys=None, enrolled=int(r['enrolled_count']), completed=int(r['completed_count']),
-                      completionRate=float(r['completion_rate_pct'])))
-for r in sheet('BSRS Scholarship Data Per Provi'):
-    if r.get('enrolled_count') is None:
-        continue
-    rc = region_code(r['region'])
-    pc, keys = None, None
-    if rc == '1300000000':
-        want = NCR_DISTRICTS.get(norm(r['province']), [])
-        keys = [c['key'] for c in cities if c['region'] == rc and any(norm(c['name']).startswith(w) for w in want)]
-    else:
-        cand = prov_by.get(PROV_ALIAS.get(norm(r['province']), norm(r['province'])), [])
-        pc = cand[0] if cand else None
-    stats.append(dict(level='PROVINCE', sourceName=r['province'], regionPsgc=rc, provincePsgc=pc, cityKey=None, cityKeys=keys,
-                      enrolled=int(r['enrolled_count']), completed=int(r['completed_count']), completionRate=float(r['completion_rate_pct'])))
-city_by = collections.defaultdict(list)
-for c in cities:
-    city_by[(c['province'], norm(c['name']))].append(c)
-    city_by[('*', norm(c['name']))].append(c)
-for r in sheet('BSRS Scholarship Data Per Citii'):
-    if r.get('enrolled_count') is None or not r.get('city_mun'):
-        continue
-    rc = region_code(r['region'])
-    # NCR has no provinces to match by name; matching "Quezon City" as a province would hit Quezon province
-    # (norm() drops "city"), so NCR rows only match cities by name inside NCR.
-    pcs = [] if rc == '1300000000' else prov_by.get(PROV_ALIAS.get(norm(r['province']), norm(r['province'])), [])
-    hit = None
-    if ', city of manila' in str(r['city_mun']).lower():   # Manila districts (Binondo, Ermita, ...) -> City of Manila
-        r = dict(r, city_mun='City of Manila')
-    for pc in pcs:
-        if city_by.get((pc, norm(r['city_mun']))):
-            hit = city_by[(pc, norm(r['city_mun']))][0]
-    if hit is None:
-        m = [c for c in city_by.get(('*', norm(r['city_mun'])), []) if c['region'] == rc]
-        hit = m[0] if len(m) == 1 else None
-    stats.append(dict(level='CITY', sourceName=r['city_mun'], regionPsgc=rc, provincePsgc=hit['province'] if hit else (pcs[0] if pcs else None),
-                      cityKey=hit['key'] if hit else None, cityKeys=None, enrolled=int(r['enrolled_count']),
-                      completed=int(r['completed_count']), completionRate=float(r['completion_rate_pct'])))
-dump('bsrs_stats.json', stats)
-unm = [s['sourceName'] for s in stats if s['level'] == 'PROVINCE' and not s['provincePsgc'] and not s['cityKeys']]
-unc = [s['sourceName'] for s in stats if s['level'] == 'CITY' and not s['cityKey']]
-print(f'  unmatched provinces {unm}; unmatched cities {len(unc)}: {unc[:8]}', file=sys.stderr)
 print('done', file=sys.stderr)

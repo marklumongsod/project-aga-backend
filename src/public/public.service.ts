@@ -126,8 +126,8 @@ export class PublicService {
 
     const { limitMinutes } = this.sim.limits;
     const searchKm = this.sim.searchKm(limitMinutes);
-    const candidates: Array<Record<string, unknown> & { km: number; island_id: number | null }> =
-      await this.db.query(
+    const findCenters = (withinRadius: boolean, limit: number): Promise<Array<Record<string, unknown> & { km: number; island_id: number | null }>> =>
+      this.db.query(
         `SELECT c.id, c.name, c.address, c.phone, c.lat, c.lon, c.island_id, ci.name AS city, p.name AS province,
               ST_Distance(c.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) / 1000 AS km,
               COALESCE((SELECT array_agg(${LABEL('cq.qualification')} ORDER BY cq.qualification) FROM center_qualifications cq
@@ -136,22 +136,28 @@ export class PublicService {
          LEFT JOIN cities ci ON ci.id = c.city_id
          LEFT JOIN provinces p ON p.psgc = c.province_psgc
         WHERE c.include_in_analysis
-          AND ($6::text IS NULL OR EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id
-                                             AND (lower(cq.qualification) = lower($6) OR lower(${LABEL('cq.qualification')}) = lower($6))))
+          AND ($5::text IS NULL OR EXISTS (SELECT 1 FROM center_qualifications cq WHERE cq.center_id = c.id
+                                             AND (lower(cq.qualification) = lower($5) OR lower(${LABEL('cq.qualification')}) = lower($5))))
           AND ($3::text IS NULL OR c.region_psgc = $3)
           AND ($4::text IS NULL OR c.province_psgc = $4)
-          AND ST_DWithin(c.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5 * 1000)
+          AND ($6::float8 IS NULL OR ST_DWithin(c.location::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $6 * 1000))
         ORDER BY c.location::geography <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
-        LIMIT 60`,
+        LIMIT $7`,
         [
           origin.lon,
           origin.lat,
           dto.regionPsgc ?? null,
           dto.provincePsgc ?? null,
-          SEARCH_RADIUS_KM,
           dto.qualification || null,
+          withinRadius ? SEARCH_RADIUS_KM : null,
+          limit,
         ],
       );
+    let candidates = await findCenters(true, 60);
+    // Nothing matching within the search radius (a rare qualification, a remote island): still show the nearest
+    // matching centers anywhere, so the learner sees where the closest one is and how long it takes to get there.
+    const beyondSearchRadius = candidates.length === 0;
+    if (beyondSearchRadius) candidates = await findCenters(false, dto.limit);
 
     // Qualification lists come from the TESDA API; a center whose detail call has never succeeded has none.
     let programData: { centersNearby: number; centersWithProgramData: number } | null = null;
@@ -191,6 +197,11 @@ export class PublicService {
         walkInfo.set(ci, { minutes: Math.max(1, Math.ceil(m)) });
       }
     });
+    const footKm = new Map<number, number>();
+    nearIdx.forEach((ci, k) => {
+      const km = foot?.km[0]?.[k];
+      if (km !== null && km !== undefined && walkInfo.has(ci)) footKm.set(ci, km);
+    });
     const results = candidates
       .map((c, i) => {
         const w = walkInfo.get(i);
@@ -199,6 +210,9 @@ export class PublicService {
           ? w.minutes
           : (live?.minutes[0]?.[i] ??
             this.travel.minutes(from, { id: c.id as number, lat: c.lat as number, lon: c.lon as number, islandId: c.island_id }, c.km));
+        // Distance along the same route the minutes come from; straight line only when no route was found.
+        const routedKm = walk ? footKm.get(i) : live?.minutes[0]?.[i] != null ? live?.km[0]?.[i] : null;
+        const km = routedKm ?? c.km;
         return {
           mode: walk ? ('walking' as const) : ('driving' as const),
           id: c.id,
@@ -209,7 +223,9 @@ export class PublicService {
           province: c.province,
           lat: c.lat,
           lon: c.lon,
-          km: Math.round(c.km * 10) / 10,
+          km: Math.round(km * 10) / 10,
+          /** road: along the route (road + ferry, or footpaths for a walk); straight-line: no route was available */
+          kmBy: routedKm != null ? ('road' as const) : ('straight-line' as const),
           minutes: Math.round(minutes),
           withinLimit: minutes <= limitMinutes,
           qualifications: c.qualifications as string[],
@@ -229,6 +245,8 @@ export class PublicService {
       travelModel: live ? this.routing.label : this.travel.name,
       /** true when no matching center is within the travel limit: the learner is in an assessment desert */
       desert: !results.some((r) => r.withinLimit),
+      /** true when no matching center is within 150 km: the results are the nearest matching centers anywhere */
+      beyondSearchRadius,
       /**
        * With a qualification filter: how many centers nearby (within reach of the limit) have qualification data.
        * When few do, "no center offers it" may mean "no data yet" - the UI should say so.

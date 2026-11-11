@@ -74,7 +74,12 @@ Route guard: if there's no token, go to `/login?next=…`. If the role isn't all
 - Send `Authorization: Bearer <token>` on every non-public call. There is no refresh token. The token lasts 8 h.
 - Keep the token in memory, mirrored to `sessionStorage` so it survives a page reload. Only when the user ticks **Keep me signed in on this device** is it kept in `localStorage` instead, so it survives closing the browser; it still expires after 8 hours, and signing out or a `401` removes it from both. On any `401` from the API, clear it and redirect to `/login?next=…` with "Your session ended, please sign in again".
 - On app load with a stored token, call **`GET /auth/me`** to restore the user.
-- **"Continue with TESDA SSO (T2MIS)"**: show the button as in the design. `POST /auth/sso/t2mis` returns `501` until T2MIS is configured. Show "TESDA SSO isn't connected yet. Use your email for now."
+- **"Continue with TESDA SSO (T2MIS)"** (authorization code + PKCE; the API keeps the client secret):
+  1. `GET /auth/sso/t2mis` → `{ authorizationEndpoint, endSessionEndpoint, clientId, redirectUri, scope, codeChallengeMethod: 'S256' }`. On `501`, show "TESDA SSO isn't connected yet. Use your email for now." and keep the email form.
+  2. Create a random `codeVerifier` (43-128 characters of `A-Z a-z 0-9 - . _ ~`), a random `state`, and `code_challenge` = base64url(SHA-256(codeVerifier)). Put the verifier, the state and `next` in `sessionStorage`, then go to `authorizationEndpoint?client_id&redirect_uri&response_type=code&scope&state&code_challenge&code_challenge_method=S256`. Use `redirectUri` exactly as it is given.
+  3. On the callback page (`redirectUri`, e.g. `/sso/callback`): if `state` doesn't match, show the sign-in screen with "Sign-in was interrupted, please try again". Otherwise `POST /auth/sso/t2mis { code, codeVerifier }`, clear the stored values, and treat the response exactly like `/auth/login`. If the URL has `?error=` (the user cancelled), go back to the sign-in screen.
+  4. Errors: `401` "TESDA sign-in failed or expired, please try again"; `403` show the API `message` (role not allowed, no region/province set in T2MIS, account disabled); `409` "This email is already linked to another T2MIS account. Contact your administrator."; `502` "TESDA SSO is not responding, try again later or use your email".
+  5. Sign out after an SSO sign-in: clear the token, then (if `endSessionEndpoint` is set) go to `endSessionEndpoint?client_id=…&post_logout_redirect_uri=<app>/login`.
 - "Forgot password?" and "No account?" are informational only: accounts and passwords are managed in T2MIS.
 - Sign out: clear the token and go to `/login`.
 
@@ -138,8 +143,8 @@ All parameters are optional. Omit them to get the user's home area. `level` is `
   "run": { "id": "539a…", "finishedAt": 1793327052,
            "assumptions": { "travel": "osrm(road+ferry matrix, 109301 pairs, …)",
                             "limitMinutes": 90,
-                            "candidates": "BSRS completed per city (…)",
-                            "centers": "assessment centers listed by the TESDA Assessor Coverage API (synced nightly)" } },
+                            "candidates": "upcoming TESDA graduates (next 6 months, every qualification), per town (…)",
+                            "centers": "assessment centers listed by the TESDA Assessor Coverage API (synced monthly)" } },
   "area": { "level": "PROVINCE", "code": "0604500000", "name": "Negros Occidental", "parentCode": "0600000000",
             "candidates": 35185, "flagged": 5675, "flaggedShare": 0.161, "centers": 40,
             "densityBand": 0, "desertLevel": 4, "desertCities": 5, "desertCandidates": 5675,
@@ -459,7 +464,7 @@ Build these with a clear placeholder and don't fake the data.
 
 | Feature in design | Status | Frontend behavior |
 | --- | --- | --- |
-| TESDA SSO (T2MIS) | `501` | Button shows the "not connected yet" message |
+| TESDA SSO (T2MIS) | built; `501` until the server sets `T2MIS_SSO_ISSUER` | On `501` the button shows the "not connected yet" message |
 | Send to Regional Office | no endpoint | Toast "coming soon" |
 | Reports page | no endpoint | Placeholder page |
 | Qualification filter on dashboards and what-if | no per-qualification candidate counts | Disabled select + hint |

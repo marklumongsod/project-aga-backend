@@ -7,8 +7,9 @@
  *      The rest (coordinates disputed, or no city/province link) are tested: do the coordinates fall in the province the
  *      record names, and do they sit with the other centers of their city (median + 3 x MAD)? Eligible ones can be
  *      recovered with --apply. Every change is logged in center_recovery_log, and --revert puts it all back.
- *   2. Candidate counts that were filled in by splitting a total evenly (a mean). Shows how much of the demand that is,
- *      and flags provinces where the even share looks unlike the measured cities there (outside the IQR fences).
+ *   2. Candidates (upcoming TESDA graduates) that the API places only in a province, so they are split over its towns.
+ *      Shows how much of the demand that is, and lists the provinces where most of it is split (town figures there
+ *      are mostly estimates).
  *
  *   npm run data:quality                 report only (changes nothing)
  *   npm run data:quality -- --apply      recover the centers that pass, then re-run `npm run travel:build` and `npm run simulate`
@@ -16,7 +17,7 @@
  */
 import { DataSource } from 'typeorm';
 import { haversineKm } from '../common/geo/haversine';
-import { iqrFences, median } from '../common/robust-stats';
+import { median } from '../common/robust-stats';
 import { typeormOptions } from '../database/data-source';
 import { CityContext, decideRecovery, ExcludedCenter, normalizeName } from '../database/center-recovery';
 import { DemandService } from '../simulation/demand.service';
@@ -154,29 +155,27 @@ async function main() {
     for (const [k, vs] of group(kept, (v) => `${v.row.source_city_name ?? '?'} [${v.row.coord_status}]: ${v.reason}`))
       console.log(`  keep  ${String(vs.length).padStart(3)}  ${k}`);
 
-    // ---- candidates filled in by an even split
-    console.log(`\nCandidates (who needs an assessment)\n${line('=')}`);
+    // ---- candidates split from province-only graduates
+    console.log(`\nCandidates (upcoming TESDA graduates)\n${line('=')}`);
     const groupsD = await new DemandService(ds).currentGroups();
     const allCandidates = groupsD.reduce((n, g) => n + g.count, 0);
-    for (const src of ['bsrs_city', 'split_province', 'split_district'] as const) {
-      const gs = groupsD.filter((g) => g.source === src);
-      const n = gs.reduce((a, g) => a + g.count, 0);
-      const label = { bsrs_city: 'measured per city (BSRS)', split_province: 'filled in: province total split evenly', split_district: 'filled in: NCR district split evenly' }[src];
-      console.log(`  ${label.padEnd(44)} ${String(gs.length).padStart(5)} cities  ${fmt(n).padStart(10)} candidates  ${((100 * n) / allCandidates).toFixed(1).padStart(5)}%`);
+    const splitTotal = groupsD.reduce((n, g) => n + g.estimated, 0);
+    const pct = (n: number, of: number) => (of ? ((100 * n) / of).toFixed(1) : '0.0').padStart(5);
+    console.log(`  ${'placed in a town by the TESDA API'.padEnd(44)} ${fmt(allCandidates - splitTotal).padStart(10)} candidates  ${pct(allCandidates - splitTotal, allCandidates)}%`);
+    console.log(`  ${'province only, split over its towns'.padEnd(44)} ${fmt(splitTotal).padStart(10)} candidates  ${pct(splitTotal, allCandidates)}%`);
+    const byProv = new Map<string, { all: number; split: number }>();
+    for (const g of groupsD) {
+      const p = byProv.get(g.provincePsgc) ?? { all: 0, split: 0 };
+      p.all += g.count;
+      p.split += g.estimated;
+      byProv.set(g.provincePsgc, p);
     }
-    const byProv = new Map<string, typeof groupsD>();
-    for (const g of groupsD) byProv.set(g.provincePsgc, [...(byProv.get(g.provincePsgc) ?? []), g]);
-    const odd: string[] = [];
-    for (const [prov, gs] of byProv) {
-      const measured = gs.filter((g) => g.source === 'bsrs_city').map((g) => g.count);
-      const filled = gs.filter((g) => g.source === 'split_province');
-      if (measured.length < 4 || !filled.length) continue;
-      const f = iqrFences(measured);
-      const share = filled[0]!.count;
-      if (share > f.high || share < f.low)
-        odd.push(`  ${prov}: even share ${fmt(share)} vs measured median ${fmt(Math.round(median(measured)))} (normal range ${fmt(Math.round(f.low))}-${fmt(Math.round(f.high))}, ${measured.length} measured cities)`);
-    }
-    console.log(odd.length ? `\n  Even share looks unlike the measured cities (outside the IQR fences):\n${odd.join('\n')}` : '\n  In every province with enough measured cities, the even share is in line with them.');
+    const mostlySplit = [...byProv].filter(([, p]) => p.all > 0 && p.split / p.all > 0.5).sort((a, b) => b[1].split / b[1].all - a[1].split / a[1].all);
+    console.log(
+      mostlySplit.length
+        ? `\n  Provinces where most candidates are split (their town figures are mostly estimates):\n${mostlySplit.map(([prov, p]) => `  ${prov}: ${pct(p.split, p.all)}% of ${fmt(p.all)}`).join('\n')}`
+        : '\n  In every province, most candidates are placed in a town.',
+    );
 
     if (apply) {
       await ds.transaction(async (m) => {

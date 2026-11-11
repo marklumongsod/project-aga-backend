@@ -237,8 +237,8 @@ export class SimulationService {
       ]) {
         a.candidates += res.count;
         a.flagged += res.flagged;
-        // Only a city's share is an estimate; the province total it was split from is a measured BSRS figure.
-        if (a.level === AreaLevel.CITY && (g.source === 'split_province' || g.source === 'split_district')) a.estimatedCandidates += res.count;
+        // Only a city's share of province-only graduates is an estimate; the province total counts every graduate.
+        if (a.level === AreaLevel.CITY) a.estimatedCandidates += g.estimated;
         // Team doc: an assessment desert is a city with candidates and no center within the travel range.
         if (isDesert) {
           a.desertCities += 1;
@@ -290,8 +290,8 @@ export class SimulationService {
         assumptions: {
           candidates: custom?.qualification
             ? `upcoming TESDA graduates in ${custom.qualification.name}, per town (province-only figures split over the towns)`
-            : 'BSRS completed per city (province totals split by upcoming graduates where no city data)',
-          centers: 'assessment centers listed by the TESDA Assessor Coverage API (synced nightly)',
+            : 'upcoming TESDA graduates (next 6 months, every qualification), per town (province-only figures split over the towns)',
+          centers: 'assessment centers listed by the TESDA Assessor Coverage API (synced monthly)',
           limitMinutes,
           travel: this.travel.name,
         },

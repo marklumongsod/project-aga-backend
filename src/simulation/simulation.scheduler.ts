@@ -6,13 +6,17 @@ import { TesdaSyncService } from '../tesda/tesda-sync.service';
 import { SimulationService } from './simulation.service';
 
 /**
- * Daily refresh ("Feature: per day updates"). Schedule comes from SIM_CRON (Asia/Manila).
- * Centers are pulled from the TESDA API first (TESDA recalculates around 01:30 Manila); if that fails the
- * simulation still runs on the centers of the last good sync.
+ * Two schedules (Asia/Manila):
+ *   - TESDA_SYNC_CRON (monthly by default): pull centers, qualifications and upcoming graduates from the TESDA API.
+ *     TESDA recalculates around 01:30 Manila, so the default runs at 01:45 on the 1st.
+ *   - SIM_CRON (daily): run the simulation on whatever was last synced.
+ * Both go through one queue, so they never overlap: on a sync day the simulation waits for the sync and uses its
+ * data. A failed sync keeps the last good data; the simulation still runs.
  */
 @Injectable()
 export class SimulationScheduler implements OnApplicationBootstrap {
   private readonly logger = new Logger(SimulationScheduler.name);
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly sim: SimulationService,
@@ -23,20 +27,42 @@ export class SimulationScheduler implements OnApplicationBootstrap {
 
   onApplicationBootstrap() {
     if (this.config.get('NODE_ENV') === 'test') return;
-    const cron = this.config.get<string>('SIM_CRON', '0 2 * * *');
-    const job = CronJob.from({
-      cronTime: cron,
-      timeZone: 'Asia/Manila',
-      onTick: () => {
-        this.tesda
-          .sync('scheduler')
-          .catch((e: Error) => this.logger.error(`TESDA sync failed, simulating on the last synced centers: ${e.message}`))
-          .then(() => this.sim.runAll('scheduler'))
-          .catch((e: Error) => this.logger.error(`scheduled simulation failed: ${e.message}`, e.stack));
-      },
+    const syncCron = this.config.get<string>('TESDA_SYNC_CRON', '45 1 1 * *');
+    const simCron = this.config.get<string>('SIM_CRON', '0 2 * * *');
+    this.schedule('tesda-sync', syncCron, () => this.runSync());
+    this.schedule('daily-simulation', simCron, () => this.runSimulation());
+    this.logger.log(`TESDA sync scheduled: "${syncCron}"; simulation scheduled: "${simCron}" (Asia/Manila)`);
+  }
+
+  /** Runs a task after every task queued before it; a failing task doesn't block the next. */
+  enqueue(task: () => Promise<void>): Promise<void> {
+    this.queue = this.queue.then(task, task);
+    return this.queue;
+  }
+
+  runSync(): Promise<void> {
+    return this.enqueue(async () => {
+      try {
+        await this.tesda.sync('scheduler');
+      } catch (e) {
+        this.logger.error(`TESDA sync failed, keeping the last synced data: ${(e as Error).message}`);
+      }
     });
-    this.registry.addCronJob('daily-simulation', job);
+  }
+
+  runSimulation(): Promise<void> {
+    return this.enqueue(async () => {
+      try {
+        await this.sim.runAll('scheduler');
+      } catch (e) {
+        this.logger.error(`scheduled simulation failed: ${(e as Error).message}`, (e as Error).stack);
+      }
+    });
+  }
+
+  private schedule(name: string, cronTime: string, onTick: () => Promise<void>) {
+    const job = CronJob.from({ cronTime, timeZone: 'Asia/Manila', onTick: () => void onTick() });
+    this.registry.addCronJob(name, job);
     job.start();
-    this.logger.log(`daily TESDA sync + simulation scheduled: "${cron}" Asia/Manila`);
   }
 }

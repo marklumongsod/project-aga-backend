@@ -55,7 +55,7 @@ async function main() {
     // TESDA API data (center_qualifications, upcoming_graduates) goes too: `npm run tesda:sync` reloads it on top of the seed.
     // So does the sync log, or the next sync would think the reseeded centers are already up to date and skip.
     await qr.query(`TRUNCATE center_utilization, area_utilization, simulation_runs, center_qualifications, upcoming_graduates,
-      tesda_syncs, bsrs_stats, assessment_centers, cities, provinces RESTART IDENTITY CASCADE`);
+      tesda_syncs, assessment_centers, cities, provinces RESTART IDENTITY CASCADE`);
     await qr.query(
       `DELETE FROM users WHERE region_psgc IS NOT NULL OR province_psgc IS NOT NULL OR role = 'CO'`,
     );
@@ -173,33 +173,7 @@ async function main() {
     );
     await qr.query(`UPDATE assessment_centers SET location = ST_SetSRID(ST_MakePoint(lon, lat), 4326)`);
 
-    // BSRS demand
-    await insert(
-      qr,
-      'bsrs_stats',
-      [
-        'level',
-        'source_name',
-        'region_psgc',
-        'province_psgc',
-        'city_key',
-        'city_keys',
-        'enrolled',
-        'completed',
-        'completion_rate',
-      ],
-      load<Row>('bsrs_stats.json').map((s) => ({
-        level: s.level,
-        source_name: s.sourceName,
-        region_psgc: s.regionPsgc,
-        province_psgc: s.provincePsgc,
-        city_key: s.cityKey,
-        city_keys: (s.cityKeys as string[] | null) ?? [],
-        enrolled: s.enrolled,
-        completed: s.completed,
-        completion_rate: s.completionRate,
-      })),
-    );
+    // Candidates are not seeded: they are the upcoming TESDA graduates, loaded by `npm run tesda:sync`.
 
     // demo office accounts (no self sign-up; real accounts come from T2MIS)
     const pw = process.env.SEED_DEMO_PASSWORD;
@@ -242,7 +216,7 @@ async function main() {
     const counts = await ds.query(`SELECT
       (SELECT count(*) FROM regions) regions, (SELECT count(*) FROM provinces) provinces, (SELECT count(*) FROM cities) cities,
       (SELECT count(*) FROM assessment_centers) centers, (SELECT count(*) FROM assessment_centers WHERE include_in_analysis) centers_in_analysis,
-      (SELECT count(*) FROM bsrs_stats) bsrs, (SELECT count(*) FROM users) users`);
+      (SELECT count(*) FROM users) users`);
     console.log('seeded', counts[0]);
   } catch (e) {
     await qr.rollbackTransaction();

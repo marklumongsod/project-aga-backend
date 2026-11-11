@@ -1,5 +1,4 @@
-import { Injectable, NotImplementedException, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
@@ -8,6 +7,7 @@ import { AuthUser } from '../common/auth.decorators';
 import { User } from '../database/entities';
 import { AuthUserDto, LoginResponseDto } from './auth.dto';
 import { nowEpoch } from '../database/epoch';
+import { T2misSsoService } from './t2mis/t2mis-sso.service';
 
 export interface JwtPayload {
   sub: string;
@@ -26,7 +26,7 @@ export class AuthService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly jwt: JwtService,
-    private readonly config: ConfigService,
+    private readonly sso: T2misSsoService,
   ) {}
 
   async login(email: string, password: string): Promise<LoginResponseDto> {
@@ -45,17 +45,10 @@ export class AuthService {
     return this.issue(user);
   }
 
-  /**
-   * T2MIS single sign-on. Accounts are not created here: a T2MIS user must already be
-   * linked (users.t2mis_user_id). Needs the T2MIS OIDC issuer details before it can verify tokens.
-   */
-  async loginWithT2mis(_idToken: string): Promise<LoginResponseDto> {
-    if (!this.config.get<string>('T2MIS_SSO_ISSUER')) {
-      throw new NotImplementedException('T2MIS single sign-on is not configured yet (set T2MIS_SSO_ISSUER)');
-    }
-    // TODO(T2MIS): verify the ID token against the issuer's JWKS (signature, iss, aud = client id, exp),
-    // then find the user by t2mis_user_id = token.sub and call this.issue(user).
-    throw new NotImplementedException('T2MIS single sign-on is waiting for the T2MIS OIDC specification');
+  /** T2MIS single sign-on (SSOPortal): see T2misSsoService. 501 while T2MIS_SSO_ISSUER is empty. */
+  async loginWithT2mis(code: string, codeVerifier: string): Promise<LoginResponseDto> {
+    const user = await this.sso.signIn(code, codeVerifier);
+    return this.issue(user);
   }
 
   async me(id: string): Promise<AuthUserDto> {
