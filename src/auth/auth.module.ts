@@ -5,7 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { StringValue } from 'ms';
 import { Province, Region, User } from '../database/entities';
-import { AuthController, GatewayAuthController } from './auth.controller';
+import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { T2misOidcClient } from './t2mis/t2mis-oidc.client';
@@ -26,7 +26,7 @@ import { T2misSsoService } from './t2mis/t2mis-sso.service';
       }),
     }),
   ],
-  controllers: [AuthController, GatewayAuthController],
+  controllers: [AuthController],
   providers: [AuthService, JwtStrategy, T2misOidcClient, T2misSsoService],
 })
 export class AuthModule {}

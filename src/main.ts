@@ -12,6 +12,11 @@ export function configureApp(app: INestApplication) {
   const config = app.get(ConfigService);
   const proxies = config.get<number>('TRUST_PROXY', 0);
   if (proxies > 0) (app.getHttpAdapter().getInstance() as { set(k: string, v: unknown): void }).set('trust proxy', proxies);
+  // The TESDA Gateway forwards <gw>/aga/api/<path> to this API as /api/v1/api/<path>: take that as /api/v1/<path>.
+  app.use((req: { url: string }, _res: unknown, next: () => void) => {
+    if (req.url.startsWith('/api/v1/api/')) req.url = req.url.slice('/api/v1/api'.length).replace(/^/, '/api/v1');
+    next();
+  });
   app.use(helmet());
   // gzip JSON over 1 KB: the map payloads (heat points, shapes, drive-time grids) shrink 80-90% on the wire
   app.use(compression({ threshold: 1024 }));

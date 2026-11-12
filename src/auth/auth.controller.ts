@@ -41,7 +41,9 @@ export class AuthController {
    */
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Version(VERSION_NEUTRAL)
+  // /api/auth/callback, and /api/v1/auth/callback for the TESDA Gateway (<gw>/aga/api/auth/callback arrives as
+  // /api/v1/api/auth/callback, which main.ts takes as /api/v1/auth/callback)
+  @Version([VERSION_NEUTRAL, '1'])
   @Get('callback')
   @Redirect()
   t2misCallback(@Req() req: Request): { url: string; statusCode: number } {
@@ -65,23 +67,5 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser): Promise<AuthUserDto> {
     return this.auth.me(user.id);
-  }
-}
-
-/**
- * The same SSOPortal return as /api/auth/callback, at the path the TESDA Gateway delivers it to: the Gateway forwards
- * `<gw>/aga/<path>` to this API as `/api/v1/<path>`, so `<gw>/aga/api/auth/callback` arrives as /api/v1/api/auth/callback.
- */
-@ApiTags('auth')
-@Controller('api/auth')
-export class GatewayAuthController {
-  constructor(private readonly sso: T2misSsoService) {}
-
-  @Public()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  @Get('callback')
-  @Redirect()
-  t2misCallback(@Req() req: Request): { url: string; statusCode: number } {
-    return { url: this.sso.callbackRedirect(req.query as Record<string, unknown>), statusCode: 302 };
   }
 }

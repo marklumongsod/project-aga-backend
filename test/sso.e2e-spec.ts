@@ -84,6 +84,12 @@ describe('T2MIS single sign-on (e2e)', () => {
       .expect('Location', 'http://localhost:5173/sso/callback?code=c3&state=s3');
   });
 
+  it('answers every route the way the TESDA Gateway forwards it (<gw>/aga/api/<path> -> /api/v1/api/<path>)', () =>
+    api()
+      .get('/api/v1/api/auth/sso/t2mis')
+      .expect(200)
+      .expect((r) => expect(r.body.clientId).toBe(CLIENT_ID)));
+
   it('signs in a Central Office user (SU) and creates the account', async () => {
     const r = await signIn({ sub: `${SUB}co`, email: 'E2E.SSO.CO@tesda.example', name: 'E2E CO', role: 'SU' }).expect(200);
     expect(r.body.tokenType).toBe('Bearer');
