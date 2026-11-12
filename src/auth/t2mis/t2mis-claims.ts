@@ -131,3 +131,28 @@ export function claimEmail(c: Record<string, unknown>): string | null {
   const found = [str(c.email), str(c.name), str(c.preferred_username)].find((v) => EMAIL.test(v));
   return found ? found.toLowerCase() : null;
 }
+
+/** The path the API takes the SSOPortal return on (Gateway format: `<gw>/aga/api/auth/callback`). */
+export const API_CALLBACK_PATH = '/api/auth/callback';
+/** What SSOPortal sends back that the frontend needs; anything else (`iss`, ...) is dropped. */
+const CALLBACK_PARAMS = ['code', 'state', 'error', 'error_description'] as const;
+
+/**
+ * Where `/api/auth/callback` sends the browser: the frontend's `/sso/callback` with the code and state, so the
+ * frontend (which holds the PKCE verifier) finishes the sign-in. The target is fixed by config, never by the request.
+ * `appUrl` empty = the redirect URI without `/api/auth/callback` (the app and its API share `<gw>/aga`).
+ */
+export function frontendCallbackUrl(appUrl: string | undefined, redirectUri: string, query: Record<string, unknown>): string {
+  let base = appUrl?.trim();
+  if (!base) {
+    const u = new URL(redirectUri);
+    const path = u.pathname.replace(/\/+$/, '');
+    base = u.origin + (path.endsWith(API_CALLBACK_PATH) ? path.slice(0, -API_CALLBACK_PATH.length) : '');
+  }
+  const params = new URLSearchParams();
+  for (const k of CALLBACK_PARAMS) {
+    const v = query[k];
+    if (typeof v === 'string' && v && v.length <= 4096) params.set(k, v);
+  }
+  return `${base.replace(/\/+$/, '')}/sso/callback?${params.toString()}`;
+}

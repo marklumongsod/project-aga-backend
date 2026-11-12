@@ -19,7 +19,8 @@ process.env.T2MIS_SSO_ISSUER = ISSUER;
 process.env.T2MIS_SSO_CLIENT_ID = CLIENT_ID;
 process.env.T2MIS_SSO_CLIENT_SECRET = CLIENT_SECRET;
 process.env.T2MIS_SSO_REDIRECT_URI = REDIRECT_URI;
-process.env.T2MIS_SSO_SCOPES = 'openid profile roles';
+process.env.T2MIS_SSO_APP_URL = 'http://localhost:5173';
+process.env.T2MIS_SSO_SCOPES ='openid profile roles';
 process.env.T2MIS_SSO_ROLE_MAP = 'CAD=CO,SU=CO,Admin=CO,RO=AUTO';
 // Sign-in allows 10 calls a minute per client IP; behind one (simulated) proxy each test call can be its own client.
 process.env.TRUST_PROXY = '1';

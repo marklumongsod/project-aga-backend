@@ -68,6 +68,22 @@ describe('T2MIS single sign-on (e2e)', () => {
         }),
       ));
 
+  it('takes the SSOPortal return on /api/auth/callback (Gateway format) and forwards code + state to the frontend', async () => {
+    await api()
+      .get('/api/auth/callback?code=c1&state=s1&iss=x&next=https://evil.example')
+      .expect(302)
+      .expect('Location', 'http://localhost:5173/sso/callback?code=c1&state=s1');
+    await api()
+      .get('/api/auth/callback?error=access_denied&state=s2')
+      .expect(302)
+      .expect('Location', 'http://localhost:5173/sso/callback?state=s2&error=access_denied');
+    // what the TESDA Gateway delivers: <gw>/aga/api/auth/callback -> /api/v1/api/auth/callback
+    await api()
+      .get('/api/v1/api/auth/callback?code=c3&state=s3&iss=https%3A%2F%2Fsso%2F')
+      .expect(302)
+      .expect('Location', 'http://localhost:5173/sso/callback?code=c3&state=s3');
+  });
+
   it('signs in a Central Office user (SU) and creates the account', async () => {
     const r = await signIn({ sub: `${SUB}co`, email: 'E2E.SSO.CO@tesda.example', name: 'E2E CO', role: 'SU' }).expect(200);
     expect(r.body.tokenType).toBe('Bearer');

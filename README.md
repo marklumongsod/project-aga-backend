@@ -46,6 +46,7 @@ npm run lint        # type-check
 | --- | --- | --- | --- |
 | POST | `/auth/login` | public | Normal sign-in → JWT |
 | GET | `/auth/sso/t2mis` | public | How to start a TESDA SSO (T2MIS) sign-in: authorization endpoint, client id, redirect URI, scope. 501 while `T2MIS_SSO_ISSUER` is empty |
+| GET | `/api/auth/callback` (unversioned) | public | SSOPortal's return address in the TESDA Gateway format (`<gw>/aga/api/auth/callback`, like EBET's `<gw>/ebet/api/auth/callback`): 302 to the frontend's `/sso/callback` with `code` and `state` (or `error`). 501 while `T2MIS_SSO_ISSUER` is empty |
 | POST | `/auth/sso/t2mis` | public | `{ code, codeVerifier }` from the SSOPortal redirect → JWT (same shape as `/auth/login`). Creates or refreshes the account from the T2MIS claims |
 | GET | `/auth/me` | office | User and area scope |
 | GET | `/dashboard/overview?level=&code=&limitMinutes=` | office | KPIs, Top 5 / Top 3, all child areas. Defaults to the user's home area |
@@ -174,7 +175,7 @@ TESDA's microservices sign in through **SSOPortal** (OpenIddict) using the autho
 
 1. The frontend calls `GET /auth/sso/t2mis` and gets `authorizationEndpoint`, `clientId`, `redirectUri` and `scope`.
 2. It creates a PKCE verifier, plus a `state` it keeps in `sessionStorage`, and sends the browser to `authorizationEndpoint?client_id=…&redirect_uri=…&response_type=code&scope=…&state=…&code_challenge=…&code_challenge_method=S256`.
-3. SSOPortal returns to `redirectUri?code=…&state=…`. The frontend checks `state`, then calls `POST /auth/sso/t2mis { code, codeVerifier }`.
+3. SSOPortal returns to `redirectUri?code=…&state=…`: either the frontend's `/sso/callback` directly, or (Gateway format) the API's `/api/auth/callback`, which only forwards `code`, `state` and `error` to the frontend's `/sso/callback` (`T2MIS_SSO_APP_URL`). The frontend checks `state`, then calls `POST /auth/sso/t2mis { code, codeVerifier }`.
 4. The API exchanges the code at the token endpoint (`client_secret_post`). It verifies the ID token (signature from the JWKS, issuer, audience, expiry) and the access token, which is where SSOPortal puts `role`, `RegionId` and `ProvinceId`. It then answers like `/auth/login`.
 
 **Accounts** are matched by `users.t2mis_user_id` (the SSO `sub`). An existing AGA account with the same email that is not linked yet adopts the T2MIS identity; otherwise a new account is created with no password. Role, region and province are refreshed from the claims at every sign-in. `is_active = false` still blocks the account.
@@ -183,7 +184,7 @@ TESDA's microservices sign in through **SSOPortal** (OpenIddict) using the autho
 
 **Area ids**: the format isn't confirmed yet. The API accepts a 10-digit PSGC, an old 9-digit PSGC, or a short code (region `6` or `06` → `0600000000`; province `45` with region 6, or `06045` → `0604500000`). An id that doesn't match a known region or province gets 403, and a warning with the raw values is logged, so the real format shows up in the logs.
 
-**Settings**: `T2MIS_SSO_ISSUER` (empty = off, 501), `T2MIS_SSO_CLIENT_ID`, `T2MIS_SSO_CLIENT_SECRET`, `T2MIS_SSO_REDIRECT_URI` (the frontend callback page, registered on the SSO client), `T2MIS_SSO_SCOPES`, `T2MIS_SSO_ROLE_MAP`. TLS is always verified. For a local SSOPortal with a dev certificate, set `NODE_EXTRA_CA_CERTS`.
+**Settings**: `T2MIS_SSO_ISSUER` (empty = off, 501), `T2MIS_SSO_CLIENT_ID`, `T2MIS_SSO_CLIENT_SECRET`, `T2MIS_SSO_REDIRECT_URI` (registered on the SSO client: the frontend's `/sso/callback`, or behind the Gateway `<gw>/aga/api/auth/callback`), `T2MIS_SSO_APP_URL` (where `/api/auth/callback` forwards to; empty = the redirect URI minus `/api/auth/callback`, right behind the Gateway; set it when the frontend is on another host, e.g. Vercel), `T2MIS_SSO_SCOPES`, `T2MIS_SSO_ROLE_MAP`. TLS is always verified. For a local SSOPortal with a dev certificate, set `NODE_EXTRA_CA_CERTS`.
 
 Not carried over from the Laravel template: the Gateway's `sso_jti` / `sso_sub` session cookies (the "kick on newer login" check). AGA uses bearer tokens, not a server session behind the Gateway. If AGA is later served through the Gateway, the frontend would set those cookies.
 

@@ -9,6 +9,7 @@ import {
   AreaLookup,
   claimEmail,
   displayName,
+  frontendCallbackUrl,
   normalizeRoles,
   parseRoleMap,
   pickRoleTarget,
@@ -36,7 +37,7 @@ export class T2misSsoService {
     @InjectRepository(Region) private readonly regions: Repository<Region>,
     @InjectRepository(Province) private readonly provinces: Repository<Province>,
     private readonly oidc: T2misOidcClient,
-    config: ConfigService,
+    private readonly config: ConfigService,
   ) {
     this.roleMap = parseRoleMap(config.get<string>('T2MIS_SSO_ROLE_MAP', 'CAD=CO,SU=CO,Admin=CO,RO=AUTO'));
   }
@@ -52,6 +53,12 @@ export class T2misSsoService {
       scope: this.oidc.scope,
       codeChallengeMethod: 'S256',
     };
+  }
+
+  /** Where `GET /api/auth/callback` sends the browser: the frontend's /sso/callback with the code and state. 501 if off. */
+  callbackRedirect(query: Record<string, unknown>): string {
+    this.oidc.assertConfigured();
+    return frontendCallbackUrl(this.config.get<string>('T2MIS_SSO_APP_URL'), this.oidc.redirectUri, query);
   }
 
   /** Verifies the sign-in with SSOPortal and returns the (created or refreshed) AGA account. */

@@ -53,7 +53,7 @@ src/
     rate-band.ts             desert levels (DESERT_LEVELS), isoBand(), toEpoch()
     geo/haversine.ts
     database-exception.filter.ts
-  auth/                      POST /auth/login, GET+POST /auth/sso/t2mis (SSOPortal OIDC, code + PKCE), GET /auth/me
+  auth/                      POST /auth/login, GET+POST /auth/sso/t2mis (SSOPortal OIDC, code + PKCE), GET /api/auth/callback (unversioned, Gateway-format return: 302 to the frontend's /sso/callback), GET /auth/me
     t2mis/                   t2mis-claims.ts (pure: role map, area ids -> PSGC), t2mis-oidc.client.ts (discovery, code exchange, JWKS verify), t2mis-sso.service.ts (find/link/create account)
   scope/area-scope.service.ts  THE place that decides which areas a user may see; use it, don't re-implement
   dashboard/                 /dashboard/overview | map | centers

@@ -78,10 +78,22 @@ export class EnvironmentVariables {
   @IsString()
   T2MIS_SSO_CLIENT_SECRET?: string;
 
-  /** The frontend URL SSOPortal sends the user back to (must be registered on the SSO client). */
+  /**
+   * The URL SSOPortal sends the user back to (must be registered on the SSO client). Either the API's
+   * `/api/auth/callback` (Gateway format, e.g. `https://gw/aga/api/auth/callback`; it forwards to the frontend) or the
+   * frontend's own `/sso/callback`.
+   */
   @ValidateIf((o: EnvironmentVariables) => !!o.T2MIS_SSO_ISSUER)
   @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true })
   T2MIS_SSO_REDIRECT_URI?: string;
+
+  /**
+   * Where the frontend lives, for `/api/auth/callback` to forward to (`<this>/sso/callback`). Empty = the redirect URI
+   * without `/api/auth/callback` (right behind the Gateway, where the app and its API share `<gw>/aga`).
+   */
+  @IsOptional()
+  @IsUrl({ protocols: ['http', 'https'], require_tld: false, require_protocol: true })
+  T2MIS_SSO_APP_URL?: string;
 
   @IsString()
   @IsNotEmpty()

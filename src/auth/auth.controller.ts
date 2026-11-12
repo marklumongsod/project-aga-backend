@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Redirect, Req, Version, VERSION_NEUTRAL } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthUser, CurrentUser, Public } from '../common/auth.decorators';
@@ -32,6 +33,22 @@ export class AuthController {
   }
 
   /**
+   * SSOPortal's return address in the Gateway format (`<gw>/aga/api/auth/callback`, like EBET's
+   * `<gw>/ebet/api/auth/callback`): 302 to the frontend's /sso/callback with `code` and `state` (or `error`), where
+   * the frontend, which holds the PKCE verifier, finishes with POST /auth/sso/t2mis. Unversioned: /api/auth/callback.
+   * The query is read raw, not through a DTO: SSOPortal may add parameters (`iss`, ...), and a 400 page here would strand
+   * the user mid sign-in; only the known parameters are passed on, to a target fixed by config.
+   */
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Version(VERSION_NEUTRAL)
+  @Get('callback')
+  @Redirect()
+  t2misCallback(@Req() req: Request): { url: string; statusCode: number } {
+    return { url: this.sso.callbackRedirect(req.query as Record<string, unknown>), statusCode: 302 };
+  }
+
+  /**
    * Finish a TESDA SSO (T2MIS) sign-in: exchanges the authorization code with SSOPortal, verifies the tokens and
    * returns an AGA access token like /auth/login. 401 bad or expired code, 403 role or area not allowed, 501 not configured.
    */
@@ -48,5 +65,23 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser): Promise<AuthUserDto> {
     return this.auth.me(user.id);
+  }
+}
+
+/**
+ * The same SSOPortal return as /api/auth/callback, at the path the TESDA Gateway delivers it to: the Gateway forwards
+ * `<gw>/aga/<path>` to this API as `/api/v1/<path>`, so `<gw>/aga/api/auth/callback` arrives as /api/v1/api/auth/callback.
+ */
+@ApiTags('auth')
+@Controller('api/auth')
+export class GatewayAuthController {
+  constructor(private readonly sso: T2misSsoService) {}
+
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Get('callback')
+  @Redirect()
+  t2misCallback(@Req() req: Request): { url: string; statusCode: number } {
+    return { url: this.sso.callbackRedirect(req.query as Record<string, unknown>), statusCode: 302 };
   }
 }

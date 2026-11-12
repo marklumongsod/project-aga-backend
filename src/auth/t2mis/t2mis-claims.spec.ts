@@ -3,6 +3,7 @@ import {
   AreaLookup,
   claimEmail,
   displayName,
+  frontendCallbackUrl,
   normalizeRoles,
   parseRoleMap,
   pickRoleTarget,
@@ -121,5 +122,25 @@ describe('T2MIS SSO claims', () => {
     expect(claimEmail({ name: 'Ana@Tesda.gov.ph' })).toBe('ana@tesda.gov.ph');
     expect(claimEmail({ name: 'Ana Cruz' })).toBeNull();
     expect(claimEmail({})).toBeNull();
+  });
+
+  describe('frontendCallbackUrl (/api/auth/callback -> the frontend)', () => {
+    const q = { code: 'abc', state: 's1', iss: 'https://sso/', evil: 'x' };
+    it('behind the Gateway: <gw>/aga/api/auth/callback forwards to <gw>/aga/sso/callback', () =>
+      expect(frontendCallbackUrl('', 'https://localhost:7118/aga/api/auth/callback', q)).toBe(
+        'https://localhost:7118/aga/sso/callback?code=abc&state=s1',
+      ));
+    it('uses T2MIS_SSO_APP_URL when the app is elsewhere (Vercel + API host)', () =>
+      expect(frontendCallbackUrl('https://app.example/', 'https://api.example/api/auth/callback', q)).toBe(
+        'https://app.example/sso/callback?code=abc&state=s1',
+      ));
+    it('passes SSOPortal errors on and drops everything else', () =>
+      expect(
+        frontendCallbackUrl('https://app.example', 'https://x/api/auth/callback', {
+          error: 'access_denied',
+          error_description: 'User said no',
+          state: ['a', 'b'],
+        }),
+      ).toBe('https://app.example/sso/callback?error=access_denied&error_description=User+said+no'));
   });
 });
