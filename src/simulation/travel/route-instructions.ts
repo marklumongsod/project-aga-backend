@@ -94,7 +94,7 @@ export function describeStep(step: RawStep): string {
 }
 
 /** Steps for display. Zero-length "notification" steps are dropped; consecutive ferry legs are merged into one. */
-export function toRouteSteps(raw: RawStep[], base: 'driving' | 'walking' = 'driving'): RouteStep[] {
+export function toRouteSteps(raw: RawStep[]): RouteStep[] {
   const out: RouteStep[] = [];
   for (const s of raw) {
     const ferry = s.mode === 'ferry';
@@ -109,7 +109,7 @@ export function toRouteSteps(raw: RawStep[], base: 'driving' | 'walking' = 'driv
       instruction: describeStep(s),
       distanceM: Math.round(s.distance),
       minutes: Math.round((s.duration / 60) * 10) / 10,
-      mode: ferry ? 'ferry' : base,
+      mode: ferry ? 'ferry' : 'driving',
       location: s.maneuver.location,
       type: s.maneuver.type,
       modifier: s.maneuver.modifier ?? null,
@@ -120,8 +120,6 @@ export function toRouteSteps(raw: RawStep[], base: 'driving' | 'walking' = 'driv
 
 /** Closer than this (straight line), people walk: no driving route is offered. */
 export const WALK_MAX_M = 500;
-/** ...unless the walking route is longer than this (a river or highway in between), then it is a drive. */
-export const WALK_MAX_ROUTE_KM = 1.2;
 const WALK_METRES_PER_MIN = 80; // ~4.8 km/h
 const WALK_DETOUR = 1.3; // paths aren't straight lines
 

@@ -5,7 +5,7 @@ What it takes to run Project AGA on a server instead of a laptop, what was teste
 ## The short version
 
 - **It can be hosted.** Both images build and run: the API (426 MB) and the website (79 MB, nginx). Tested together through nginx: health checks, the public finder, sign-in, the dashboards, the SPA routes and the cache and security headers.
-- **A single small server is enough** for the app itself (the database, API and website together use well under 1 GB of RAM). The optional OpenStreetMap routing servers are what need memory (about 3 GB for the two).
+- **A single small server is enough** for the app itself (the database, API and website together use well under 1 GB of RAM). The optional OpenStreetMap routing server is what needs memory (about 1.5 GB).
 - **Do not go live with the demo setup.** There is no way yet to create real accounts (T2MIS sign-in is not connected), and the seed creates three demo accounts. See *Before going live*.
 
 ## What runs
@@ -16,11 +16,10 @@ What it takes to run Project AGA on a server instead of a laptop, what was teste
 | `api` | NestJS API (`aga-api` image) | yes | about 60 MB idle (more while a simulation runs) |
 | `web` | nginx serving the built website and forwarding `/api` | yes | about 8 MB |
 | `osrm` | OSRM, car profile at Philippine speed limits | optional | 1.5 GB |
-| `osrm-foot` | OSRM with the foot profile | optional | 1.4 GB |
 
-Routing is optional. Without it `TRAVEL_MODEL=estimate` still works, and with a precomputed matrix (`npm run travel:build`, stored in the database) the simulation needs no routing server at all. The routing servers are only used live for the finder's exact times, directions, a center's drive-time area and the what-if pin; if they are down those fall back to the stored matrix or the estimate and the API keeps answering.
+Routing is optional. Without it `TRAVEL_MODEL=estimate` still works, and with a precomputed matrix (`npm run travel:build`, stored in the database) the simulation needs no routing server at all. The routing server is only used live for the finder's exact times, directions, a center's drive-time area and the what-if pin; if they are down those fall back to the stored matrix or the estimate and the API keeps answering.
 
-Disk: about 4.6 GB for the OpenStreetMap extract and the two routing graphs (only if you host routing), plus the database.
+Disk: about 1.8 GB for the car routing graph (only if you host routing; the 0.6 GB OpenStreetMap extract is only needed where the graph is built), plus the database.
 
 ## Deploy on one server with Docker Compose
 
@@ -40,7 +39,7 @@ docker compose exec api npm run simulate:prod              # first results; the 
 
 The API container applies database migrations every time it starts. Run the data-quality step after every `db:seed:prod` (a seed reloads the centers as the source has them), or the results will differ from other installs. Put TLS in front of port 8080 (your host's load balancer, Caddy, or nginx with a certificate); the app itself speaks plain http.
 
-Optional routing: build the graphs once (`sh scripts/osrm-prepare.sh`), then `docker compose --profile routing up -d osrm osrm-foot`, `docker compose exec api npm run travel:build:prod`, and set `TRAVEL_MODEL=osrm` in `.env`. Details are in the README (*Real travel times*).
+Optional routing: build the graph once (`sh scripts/osrm-prepare.sh`), then `docker compose --profile routing up -d osrm`, `docker compose exec api npm run travel:build:prod`, and set `TRAVEL_MODEL=osrm` in `.env`. Details are in the README (*Real travel times*).
 
 ## Before going live
 
@@ -61,7 +60,7 @@ Optional routing: build the graphs once (`sh scripts/osrm-prepare.sh`), then `do
 - **History:** the latest run of each day is kept for 90 days and the last run of each quarter forever. Results live in `area_utilization` (about 1,700 rows per run) and `center_utilization` (about 5,000 rows per run).
 - **Backups:** `docker compose exec -T db pg_dump -U aga -Fc aga > aga-$(date +%F).dump`. Everything that matters is in this one database (the recovery log, the travel matrix and the run history included). Restore with `pg_restore`.
 - **Updating:** pull the code, `docker compose --profile web up -d --build api web`. Migrations run on start. After new centers or a new OpenStreetMap extract, run `travel:build:prod` and `simulate:prod`.
-- **The routing data** (OpenStreetMap) is refreshed by hand: download a new extract, `sh scripts/osrm-prepare.sh`, restart the routing servers, rebuild the matrix.
+- **The routing data** (OpenStreetMap) is refreshed by hand: download a new extract, `sh scripts/osrm-prepare.sh`, restart the routing server, rebuild the matrix.
 
 ## Known limits
 

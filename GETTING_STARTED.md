@@ -123,9 +123,9 @@ To wipe the database and start over (this **deletes all data**): `docker compose
 
 ## 4. Optional: real road and ferry travel times (OpenStreetMap routing)
 
-Without this, travel time is an estimate (straight-line distance, plus 90 minutes for a sea crossing). With it, the simulation, the finder, the center reach and the what-if pin use real road and ferry routes, and the finder can show turn-by-turn directions and walking routes.
+Without this, travel time is an estimate (straight-line distance, plus 90 minutes for a sea crossing). With it, the simulation, the finder, the center reach and the what-if pin use real road and ferry routes, and the finder can show turn-by-turn driving directions.
 
-It needs about 5 GB of free disk (the map plus two routing graphs) and a few minutes, once.
+It needs about 2.5 GB of free disk (the map plus the routing graph) and a few minutes, once.
 
 ```bash
 cd ~/Downloads/project-aga-backend
@@ -135,11 +135,11 @@ nvm use
 mkdir -p data/osm
 curl -L -o data/osm/philippines.osm.pbf https://download.geofabrik.de/asia/philippines-latest.osm.pbf
 
-# 2. build the routing graphs (car and foot); about 2 minutes each, needs about 5 GB of free RAM
+# 2. build the car routing graph; about 2 minutes, needs about 5 GB of free RAM
 sh scripts/osrm-prepare.sh
 
-# 3. start the two routing servers (ports 5001 and 5002)
-docker compose --profile routing up -d osrm osrm-foot
+# 3. start the routing server (port 5001)
+docker compose --profile routing up -d osrm
 
 # 4. precompute travel times for every city and center (about 15 seconds)
 npm run travel:build
@@ -150,14 +150,13 @@ Then in `.env` set:
 ```
 TRAVEL_MODEL=osrm
 OSRM_URL=http://localhost:5001
-OSRM_FOOT_URL=http://localhost:5002
 ```
 
 Restart the backend, and run `npm run simulate` again so the results use the new times.
 
 Later, to start with routing: `docker compose --profile routing up -d` instead of `docker compose up -d db`.
 
-If the routing servers are off, the app keeps working with the estimate.
+If the routing server is off, the app keeps working with the estimate.
 
 ---
 
@@ -206,7 +205,7 @@ npx playwright test               # browser tests
 | Frontend notes | `project-aga-frontend/README.md` |
 | Putting it on a server | `project-aga-backend/HOSTING.md` |
 
-Ports in use: 3000 backend, 5173 frontend, 5174 frontend for sharing, 5432 database, 5001 and 5002 routing servers.
+Ports in use: 3000 backend, 5173 frontend, 5174 frontend for sharing, 5432 database, 5001 routing server.
 
 ---
 

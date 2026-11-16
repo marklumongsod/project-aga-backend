@@ -1145,21 +1145,15 @@ describe('Project AGA API (e2e)', () => {
         expect(r.body.center).not.toHaveProperty('predictedCandidates');
       });
 
-      it('says to walk when the center is within 500 m: on footpaths and roads when the foot server is up, else a straight line', async () => {
+      it('says to walk, in a straight line, when the center is within 500 m', async () => {
         // TESDA Women's Center (id 30) is about 220 m from this point
         const r = await route('lat=14.521465&lon=121.029221&centerId=30').expect(200);
         expect(r.body.mode).toBe('walking');
         expect(r.body.steps[0].mode).toBe('walking');
         expect(r.body.km).toBeLessThan(0.5);
         expect(r.body.hasFerry).toBe(false);
-        if (r.body.travelModel.startsWith('osrm(foot')) {
-          expect(r.body.geometry.coordinates.length).toBeGreaterThan(2); // follows the road network
-          expect(r.body.steps[0].instruction).toMatch(/^Head /);
-          expect(r.body.snapped.start.distanceM).toBeGreaterThan(0);
-        } else {
-          expect(r.body.geometry.coordinates).toHaveLength(2); // straight-line guide
-          expect(r.body.steps[0].instruction).toMatch(/^Walk about \d+ m \w+ to the center$/);
-        }
+        expect(r.body.geometry.coordinates).toHaveLength(2); // straight-line guide
+        expect(r.body.steps[0].instruction).toMatch(/^Walk about \d+ m \w+ to the center$/);
       });
 
       it('drives (road + ferry) when the center is farther than 500 m', async () => {

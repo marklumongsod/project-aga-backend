@@ -12,7 +12,7 @@ import { SimulationService } from '../simulation/simulation.service';
 import { RoutingService } from '../simulation/travel/routing.service';
 import { TRAVEL_TIME_MODEL, TravelTimeModel } from '../simulation/travel/travel-time.model';
 import { haversineKm } from '../common/geo/haversine';
-import { toRouteSteps, WALK_MAX_M, WALK_MAX_ROUTE_KM, walkMinutes, walkSteps } from '../simulation/travel/route-instructions';
+import { toRouteSteps, WALK_MAX_M, walkMinutes, walkSteps } from '../simulation/travel/route-instructions';
 import { NearestCentersDto, PublicStatsDto, RouteDto, RouteResultDto } from './public.dto';
 
 /** Centers farther than this are not useful to a learner and are not listed. */
@@ -178,40 +178,17 @@ export class PublicService {
       candidates.map((c) => ({ lon: c.lon as number, lat: c.lat as number })),
     );
     const from = { key: dto.cityKey ? origin.cityKey : null, lat: origin.lat, lon: origin.lon, islandId: origin.islandId };
-    // Centers within 500 m (straight line) are walks. Their time comes from the foot network when it is up, so the list
-    // matches the walking directions; a walk that turns out long (a river in between) is treated as a drive.
-    const nearIdx = candidates.map((c, i) => (c.km * 1000 <= WALK_MAX_M ? i : -1)).filter((i) => i >= 0);
-    const foot = await this.routing.table(
-      [{ lon: origin.lon, lat: origin.lat }],
-      nearIdx.map((i) => ({ lon: candidates[i]!.lon as number, lat: candidates[i]!.lat as number })),
-      'walking',
-    );
-    const walkInfo = new Map<number, { minutes: number }>();
-    nearIdx.forEach((ci, k) => {
-      const c = candidates[ci]!;
-      const m = foot?.minutes[0]?.[k];
-      const km = foot?.km[0]?.[k];
-      if (m === null || m === undefined || km === null || km === undefined) {
-        if (!foot) walkInfo.set(ci, { minutes: walkMinutes(c.km * 1000) }); // no foot network: the straight-line estimate
-      } else if (km <= WALK_MAX_ROUTE_KM) {
-        walkInfo.set(ci, { minutes: Math.max(1, Math.ceil(m)) });
-      }
-    });
-    const footKm = new Map<number, number>();
-    nearIdx.forEach((ci, k) => {
-      const km = foot?.km[0]?.[k];
-      if (km !== null && km !== undefined && walkInfo.has(ci)) footKm.set(ci, km);
-    });
     const results = candidates
       .map((c, i) => {
-        const w = walkInfo.get(i);
-        const walk = w !== undefined;
+        // Centers within 500 m (straight line) are walks, timed with the straight-line walking estimate (as the
+        // walking directions are).
+        const walk = c.km * 1000 <= WALK_MAX_M;
         const minutes = walk
-          ? w.minutes
+          ? walkMinutes(c.km * 1000)
           : (live?.minutes[0]?.[i] ??
             this.travel.minutes(from, { id: c.id as number, lat: c.lat as number, lon: c.lon as number, islandId: c.island_id }, c.km));
-        // Distance along the same route the minutes come from; straight line only when no route was found.
-        const routedKm = walk ? footKm.get(i) : live?.minutes[0]?.[i] != null ? live?.km[0]?.[i] : null;
+        // Distance along the same route the minutes come from; straight line for a walk or when no route was found.
+        const routedKm = !walk && live?.minutes[0]?.[i] != null ? live?.km[0]?.[i] : null;
         const km = routedKm ?? c.km;
         return {
           mode: walk ? ('walking' as const) : ('driving' as const),
@@ -224,7 +201,7 @@ export class PublicService {
           lat: c.lat,
           lon: c.lon,
           km: Math.round(km * 10) / 10,
-          /** road: along the route (road + ferry, or footpaths for a walk); straight-line: no route was available */
+          /** road: along the road + ferry route; straight-line: a walk, or no route was available */
           kmBy: routedKm != null ? ('road' as const) : ('straight-line' as const),
           minutes: Math.round(minutes),
           withinLimit: minutes <= limitMinutes,
@@ -273,43 +250,23 @@ export class PublicService {
     if (!onLand) throw new BadRequestException('That location is outside the Philippines or at sea');
     const centerPoint = { id: center.id, name: center.name, address: center.address, phone: center.phone, lat: center.lat, lon: center.lon };
 
-    // Close by: walk. Routed on footpaths and roads (OSRM foot profile) when that server is up; otherwise a straight-line
-    // guide. A "walk" that turns out long (a river or highway in between) falls through to the driving route.
+    // Close by: walk, with a straight-line guide (the list times it the same way).
     const straightM = haversineKm(dto.lat, dto.lon, center.lat, center.lon) * 1000;
     if (straightM <= WALK_MAX_M) {
-      const foot = await this.routing.route({ lon: dto.lon, lat: dto.lat }, { lon: center.lon, lat: center.lat }, 'walking');
-      if (foot && foot !== 'none' && foot.distanceKm <= WALK_MAX_ROUTE_KM) {
-        return {
-          mode: 'walking',
-          from: { lat: dto.lat, lon: dto.lon },
-          center: centerPoint,
-          km: Math.round(foot.distanceKm * 100) / 100,
-          minutes: Math.max(1, Math.ceil(foot.minutes)),
-          hasFerry: false,
-          geometry: { type: 'LineString', coordinates: foot.coordinates },
-          snapped: foot.snapped,
-          locationVerified: center.coord_status === 'validated',
-          steps: toRouteSteps(foot.steps, 'walking'),
-          travelModel: 'osrm(foot, live)',
-        };
-      }
-      if (foot === null) {
-        // No foot network available: a straight-line guide, as the list does.
-        const walk = walkSteps({ lat: dto.lat, lon: dto.lon }, center, straightM);
-        return {
-          mode: 'walking',
-          from: { lat: dto.lat, lon: dto.lon },
-          center: centerPoint,
-          km: Math.round((straightM / 1000) * 100) / 100,
-          minutes: walk.minutes,
-          hasFerry: false,
-          geometry: { type: 'LineString', coordinates: [[dto.lon, dto.lat], [center.lon, center.lat]] },
-          snapped: { start: { lon: dto.lon, lat: dto.lat, distanceM: 0 }, end: { lon: center.lon, lat: center.lat, distanceM: 0 } },
-          locationVerified: center.coord_status === 'validated',
-          steps: walk.steps,
-          travelModel: 'walking(straight line x 1.3 at about 4.8 km/h)',
-        };
-      }
+      const walk = walkSteps({ lat: dto.lat, lon: dto.lon }, center, straightM);
+      return {
+        mode: 'walking',
+        from: { lat: dto.lat, lon: dto.lon },
+        center: centerPoint,
+        km: Math.round((straightM / 1000) * 100) / 100,
+        minutes: walk.minutes,
+        hasFerry: false,
+        geometry: { type: 'LineString', coordinates: [[dto.lon, dto.lat], [center.lon, center.lat]] },
+        snapped: { start: { lon: dto.lon, lat: dto.lat, distanceM: 0 }, end: { lon: center.lon, lat: center.lat, distanceM: 0 } },
+        locationVerified: center.coord_status === 'validated',
+        steps: walk.steps,
+        travelModel: 'walking(straight line x 1.3 at about 4.8 km/h)',
+      };
     }
 
     if (!this.routing.enabled) {

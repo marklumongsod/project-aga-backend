@@ -11,8 +11,6 @@ import { LonLat, OsrmClient, RawRoute, TableResult } from './osrm.client';
 export class RoutingService {
   private readonly log = new Logger(RoutingService.name);
   private readonly client: OsrmClient | null;
-  /** Second OSRM instance built with the foot profile (footpaths, steps, no motorways). */
-  private readonly foot: OsrmClient | null;
   /** how callers name the model when they used live routing */
   readonly label = 'osrm(road+ferry, live; unrouted pairs: estimate)';
 
@@ -23,23 +21,16 @@ export class RoutingService {
     // Interactive calls (finder, reach, what-if) retry once, quickly; the matrix build uses the client's patient defaults.
     const quick = { retries: 1, baseDelayMs: 150 };
     this.client = on ? new OsrmClient(url, timeout, undefined, 100, 'driving', quick) : null;
-    const footUrl = config.get<string>('OSRM_FOOT_URL') || 'http://localhost:5002';
-    this.foot = on ? new OsrmClient(footUrl, timeout, undefined, 100, 'walking', quick) : null;
-  }
-
-  private pick(profile: 'driving' | 'walking') {
-    return profile === 'walking' ? this.foot : this.client;
   }
 
   get enabled() {
     return this.client !== null;
   }
 
-  async table(sources: LonLat[], destinations: LonLat[], profile: 'driving' | 'walking' = 'driving'): Promise<TableResult | null> {
-    const client = this.pick(profile);
-    if (!client || !sources.length || !destinations.length) return null;
+  async table(sources: LonLat[], destinations: LonLat[]): Promise<TableResult | null> {
+    if (!this.client || !sources.length || !destinations.length) return null;
     try {
-      return await client.table(sources, destinations);
+      return await this.client.table(sources, destinations);
     } catch (e) {
       this.log.warn(`live routing unavailable, using the estimate: ${(e as Error).message}`);
       return null;
@@ -61,11 +52,10 @@ export class RoutingService {
    * Route with geometry and maneuvers. 'none' = OSRM found no road or ferry connection;
    * null = routing is off or the server is unavailable.
    */
-  async route(from: LonLat, to: LonLat, profile: 'driving' | 'walking' = 'driving'): Promise<RawRoute | 'none' | null> {
-    const client = this.pick(profile);
-    if (!client) return null;
+  async route(from: LonLat, to: LonLat): Promise<RawRoute | 'none' | null> {
+    if (!this.client) return null;
     try {
-      return (await client.route(from, to)) ?? 'none';
+      return (await this.client.route(from, to)) ?? 'none';
     } catch (e) {
       this.log.warn(`live routing unavailable: ${(e as Error).message}`);
       return null;

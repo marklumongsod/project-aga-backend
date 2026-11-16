@@ -26,14 +26,6 @@ services:
     volumes: ["./data/osm:/data:ro"]
     ports: ["5001:5000"]
 
-  # Same map, foot profile: walking directions to centers within 500 m (footpaths, steps, no motorways).
-  osrm-foot:
-    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
-    profiles: ["routing"]
-    command: osrm-routed --algorithm mld --max-table-size 1000 /data/philippines-foot.osrm
-    volumes: ["./data/osm:/data:ro"]
-    ports: ["5002:5000"]
-
   api:
     build: .
     depends_on:
@@ -43,7 +35,6 @@ services:
       DATABASE_URL: postgresql://aga:aga@db:5432/aga?schema=public
       NODE_ENV: production
       OSRM_URL: http://osrm:5000 # used when TRAVEL_MODEL=osrm
-      OSRM_FOOT_URL: http://osrm-foot:5000
       # The website's nginx is the only way in (see the `web` service), so trust its X-Forwarded-For for rate limits.
       TRUST_PROXY: "1"
     # localhost only: with TRUST_PROXY=1 the API must be reached through the `web` proxy, not directly

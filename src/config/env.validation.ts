@@ -141,12 +141,6 @@ export class EnvironmentVariables {
   @IsUrl({ protocols: ['http', 'https'], require_tld: false })
   OSRM_URL?: string;
 
-  /** Second OSRM instance with the foot profile, for walking directions to centers within 500 m. */
-  @Transform(({ value }: { value: unknown }) => (value === '' ? undefined : value))
-  @IsOptional()
-  @IsUrl({ protocols: ['http', 'https'], require_tld: false })
-  OSRM_FOOT_URL?: string;
-
   @Transform(toInt)
   @IsInt()
   @Min(500)
