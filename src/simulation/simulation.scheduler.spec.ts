@@ -1,6 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
-import { TesdaSyncService } from '../tesda/tesda-sync.service';
+import { MonthlyRefreshService } from './monthly-refresh.service';
 import { SimulationScheduler } from './simulation.scheduler';
 import { SimulationService } from './simulation.service';
 
@@ -9,8 +9,8 @@ const tick = () => new Promise((r) => setImmediate(r));
 function setup(syncImpl: () => Promise<unknown>) {
   const log: string[] = [];
   let finishSync!: () => void;
-  const tesda = {
-    sync: jest.fn(() => {
+  const monthly = {
+    run: jest.fn(() => {
       log.push('sync:start');
       return new Promise<void>((resolve) => (finishSync = resolve))
         .then(syncImpl)
@@ -20,7 +20,7 @@ function setup(syncImpl: () => Promise<unknown>) {
   const sim = { runAll: jest.fn(async () => void log.push('simulate')) };
   const scheduler = new SimulationScheduler(
     sim as unknown as SimulationService,
-    tesda as unknown as TesdaSyncService,
+    monthly as unknown as MonthlyRefreshService,
     {} as SchedulerRegistry,
     {} as ConfigService,
   );
@@ -39,7 +39,7 @@ describe('SimulationScheduler queue', () => {
     expect(log).toEqual(['sync:start', 'sync:end', 'simulate']);
   });
 
-  it('still simulates when the sync fails', async () => {
+  it('still simulates when the monthly refresh fails', async () => {
     const { scheduler, log, finish } = setup(() => Promise.reject(new Error('TESDA down')));
     jest.spyOn((scheduler as unknown as { logger: { error: () => void } }).logger, 'error').mockImplementation(() => undefined);
     const sync = scheduler.runSync();

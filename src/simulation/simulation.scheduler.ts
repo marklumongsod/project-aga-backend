@@ -2,16 +2,17 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { TesdaSyncService } from '../tesda/tesda-sync.service';
+import { MonthlyRefreshService } from './monthly-refresh.service';
 import { SimulationService } from './simulation.service';
 
 /**
  * Two schedules (Asia/Manila):
- *   - TESDA_SYNC_CRON (monthly by default): pull centers, qualifications and upcoming graduates from the TESDA API.
- *     TESDA recalculates around 01:30 Manila, so the default runs at 01:45 on the 1st.
+ *   - TESDA_SYNC_CRON (monthly by default): the monthly refresh (MonthlyRefreshService): TESDA sync, data-quality
+ *     recovery, travel times for the centers that changed, then a simulation. TESDA recalculates around 01:30
+ *     Manila, so the default runs at 01:45 on the 1st.
  *   - SIM_CRON (daily): run the simulation on whatever was last synced.
- * Both go through one queue, so they never overlap: on a sync day the simulation waits for the sync and uses its
- * data. A failed sync keeps the last good data; the simulation still runs.
+ * Both go through one queue, so they never overlap: on a sync day the daily simulation waits for the monthly
+ * refresh and uses its data. A failed step keeps the last good data; the next step still runs.
  */
 @Injectable()
 export class SimulationScheduler implements OnApplicationBootstrap {
@@ -20,7 +21,7 @@ export class SimulationScheduler implements OnApplicationBootstrap {
 
   constructor(
     private readonly sim: SimulationService,
-    private readonly tesda: TesdaSyncService,
+    private readonly monthly: MonthlyRefreshService,
     private readonly registry: SchedulerRegistry,
     private readonly config: ConfigService,
   ) {}
@@ -29,9 +30,9 @@ export class SimulationScheduler implements OnApplicationBootstrap {
     if (this.config.get('NODE_ENV') === 'test') return;
     const syncCron = this.config.get<string>('TESDA_SYNC_CRON', '45 1 1 * *');
     const simCron = this.config.get<string>('SIM_CRON', '0 2 * * *');
-    this.schedule('tesda-sync', syncCron, () => this.runSync());
+    this.schedule('monthly-refresh', syncCron, () => this.runSync());
     this.schedule('daily-simulation', simCron, () => this.runSimulation());
-    this.logger.log(`TESDA sync scheduled: "${syncCron}"; simulation scheduled: "${simCron}" (Asia/Manila)`);
+    this.logger.log(`monthly refresh (TESDA sync, data quality, travel times, simulation) scheduled: "${syncCron}"; simulation scheduled: "${simCron}" (Asia/Manila)`);
   }
 
   /** Runs a task after every task queued before it; a failing task doesn't block the next. */
@@ -43,9 +44,9 @@ export class SimulationScheduler implements OnApplicationBootstrap {
   runSync(): Promise<void> {
     return this.enqueue(async () => {
       try {
-        await this.tesda.sync('scheduler');
+        await this.monthly.run('scheduler');
       } catch (e) {
-        this.logger.error(`TESDA sync failed, keeping the last synced data: ${(e as Error).message}`);
+        this.logger.error(`monthly refresh failed: ${(e as Error).message}`, (e as Error).stack);
       }
     });
   }
