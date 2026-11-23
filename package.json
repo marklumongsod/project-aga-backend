@@ -21,6 +21,7 @@
     "db:seed": "ts-node --transpile-only src/database/seed.ts",
     "simulate": "ts-node --transpile-only src/cli/simulate.ts",
     "demo:utilization": "ts-node --transpile-only src/cli/demo-utilization.ts",
+    "new-center:map": "python3 scripts/new-centers/build-maps.py",
     "tesda:sync": "ts-node --transpile-only src/cli/sync-tesda.ts",
     "travel:build": "ts-node --transpile-only src/cli/build-travel-matrix.ts",
     "etl": "python3 -I etl/build_seed.py",

@@ -1,0 +1,15 @@
+[
+ {
+  "name": "Example planned center",
+  "province_id": 37,
+  "city_id": 931,
+  "qual_ids": [
+   425,
+   142
+  ],
+  "accreditation_month": "2026-09",
+  "school_ids": [],
+  "center_type": 2,
+  "center_class": 1
+ }
+]
