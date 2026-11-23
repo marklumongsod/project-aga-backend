@@ -96,14 +96,19 @@ export class ProposalsService {
       0,
       120,
     );
-    // the next number in today's lineup; the lock makes two saves at the same moment take turns
+    // The next number in today's lineup, from the day's counter: the upsert locks the day's row until the end of the
+    // transaction, so two saves at the same moment take turns, and a number given out is never given again (even when
+    // that report is deleted). A failed insert rolls the counter back.
     const id = await this.db.transaction(async (tx) => {
-      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('proposals.day_no'))`);
+      const [{ last_no: dayNo }] = await tx.query(
+        `INSERT INTO proposal_day_counters (report_day, last_no) VALUES (${TODAY_SQL}, 1)
+         ON CONFLICT (report_day) DO UPDATE SET last_no = proposal_day_counters.last_no + 1
+         RETURNING last_no`,
+      );
       const [row] = await tx.query(
         `INSERT INTO proposals (author_id, name, lat, lon, city_key, city_name, region_psgc, province_psgc,
                                 area_level, area_code, area_name, limit_minutes, snapshot, report_day, day_no)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb, ${TODAY_SQL},
-                 (SELECT COALESCE(max(day_no), 0) + 1 FROM proposals WHERE report_day = ${TODAY_SQL}))
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb, ${TODAY_SQL}, $14)
          RETURNING id`,
         [
           user.id,
@@ -119,6 +124,7 @@ export class ProposalsService {
           result.area.name,
           result.limitMinutes,
           JSON.stringify(result),
+          dayNo,
         ],
       );
       return row.id as string;

@@ -281,9 +281,10 @@ describe('Project AGA API (e2e)', () => {
       const co = (await post('co', SIPALAY).expect(201)).body;
       expect(co.result.report.areas.map((a: { level: string }) => a.level)).toEqual(['REGION', 'PROVINCE', 'NATIONAL']);
       expect(co.authorAreaName).toBeNull();
-      // the planner's plain what-if doesn't carry the report part
+      // the planner's what-if carries the same figures, so its graphs match the saved report
       const w = await api().post('/api/v1/simulation/what-if').set(as('po')).send(SIPALAY).expect(200);
-      expect(w.body).not.toHaveProperty('report');
+      expect(w.body.report.areas).toEqual(rep.areas);
+      expect(w.body.report.months).toEqual(rep.months);
     });
 
     it('numbers reports GA-yyyymmdd-# by their place in the day, and keeps the number when another is deleted', async () => {
@@ -294,8 +295,11 @@ describe('Project AGA API (e2e)', () => {
       expect(a.reportId).toMatch(new RegExp(`^GA-${today}-\\d+$`));
       expect(no(b.reportId)).toBe(no(a.reportId) + 1);
       await api().delete(`/api/v1/proposals/${a.id}`).set(as('po')).expect(204);
+      await api().delete(`/api/v1/proposals/${b.id}`).set(as('po')).expect(204); // the day's newest too
       const c = (await post('po', SIPALAY).expect(201)).body;
-      expect(no(c.reportId)).toBe(no(b.reportId) + 1); // a deleted number is not reused
+      expect(no(c.reportId)).toBe(no(b.reportId) + 1); // a number given out is never given again
+      b.id = c.id;
+      b.reportId = c.reportId;
       expect((await api().get(`/api/v1/proposals/${b.id}`).set(as('po')).expect(200)).body.reportId).toBe(b.reportId);
     });
 

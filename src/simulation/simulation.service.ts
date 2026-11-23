@@ -839,15 +839,16 @@ export class SimulationService {
     };
   }
 
-  async whatIf(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
-    return (await this.runWhatIf(user, dto)).result;
+  /**
+   * The what-if, with what the planner's graphs and a proposal's report need (stored with a proposal, so its report
+   * shows the figures of the day it was saved): month-by-month flagged, deserts and utilization for the region,
+   * province and (Certification Office) nationwide; the data version; and the deserts of the pin's province before
+   * and after, for the report maps.
+   */
+  whatIf(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
+    return this.whatIfReport(user, dto);
   }
 
-  /**
-   * The what-if plus what a proposal report needs (stored with the proposal, so the report shows the figures of the
-   * day it was saved): month-by-month flagged, deserts and utilization for the region, province and (Certification Office)
-   * nationwide; the data version; and the deserts of the pin's province before and after, for the maps.
-   */
   async whatIfReport(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
     const { result, before, after, inputs, where } = await this.runWhatIf(user, dto);
     const months = reportMonths(nowEpoch());
