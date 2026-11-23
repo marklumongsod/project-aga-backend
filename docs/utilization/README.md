@@ -321,9 +321,9 @@ Current local checks:
 
 ```text
 npm run lint         passed
-npm test             156/156 passed
+npm test             168/168 passed
 npm run build        passed
-npm run test:e2e     125/125 passed
+npm run test:e2e     137/137 passed
 ```
 
 Useful database checks:
