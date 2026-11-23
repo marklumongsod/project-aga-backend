@@ -101,6 +101,8 @@ flagged share = flagged / candidates
 
 ### Capacity utilization (per center and qualification, per quarter)
 
+See [docs/utilization/README.md](docs/utilization/README.md) for the full backend notes.
+
 Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity run assigns each qualification's candidates to the **nearest accredited center with an open slot within 90 minutes**; if that center is full, overflow goes to the next reachable center. Anyone left is flagged.
 
 - Slots are stored monthly in `center_qualification_slots`: one row per center × qualification × month. A quarter is the sum of its three months.
