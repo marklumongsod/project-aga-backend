@@ -286,6 +286,19 @@ describe('Project AGA API (e2e)', () => {
       expect(w.body).not.toHaveProperty('report');
     });
 
+    it('numbers reports GA-yyyymmdd-# by their place in the day, and keeps the number when another is deleted', async () => {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date()).replace(/-/g, '');
+      const a = (await post('po', SIPALAY).expect(201)).body;
+      const b = (await post('po', SIPALAY).expect(201)).body;
+      const no = (id: string) => Number(id.split('-')[2]);
+      expect(a.reportId).toMatch(new RegExp(`^GA-${today}-\\d+$`));
+      expect(no(b.reportId)).toBe(no(a.reportId) + 1);
+      await api().delete(`/api/v1/proposals/${a.id}`).set(as('po')).expect(204);
+      const c = (await post('po', SIPALAY).expect(201)).body;
+      expect(no(c.reportId)).toBe(no(b.reportId) + 1); // a deleted number is not reused
+      expect((await api().get(`/api/v1/proposals/${b.id}`).set(as('po')).expect(200)).body.reportId).toBe(b.reportId);
+    });
+
     it('uses the same checks as the what-if: a pin outside the office area or the chosen area is refused', async () => {
       await post('po', CEBU).expect(400);
       await post('po', { ...SIPALAY, level: 'PROVINCE', code: '0305400000' }).expect(403);

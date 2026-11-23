@@ -6,8 +6,11 @@ import { WhatIfResultDto } from '../simulation/simulation.dto';
 /** A saved what-if, as listed. The full result is on `GET /proposals/:id`. */
 export class ProposalSummaryDto {
   id: string;
-  /** short report number, shown as RPT-0001 */
+  /** running number over all proposals, in save order */
   reportNo: number;
+  /** the report number: GA-yyyymmdd-#, the Asia/Manila day it was saved and its place in that day's lineup */
+  @ApiProperty({ example: 'GA-20261124-3' })
+  reportId: string;
   name: string;
   /** the city or municipality the pin landed in */
   cityKey: string | null;

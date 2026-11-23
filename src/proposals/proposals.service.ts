@@ -16,7 +16,13 @@ interface Row extends Proposal {
   authorAreaName: string | null;
 }
 
-const SELECT = `SELECT p.id, p.report_no AS "reportNo", p."name", p.lat, p.lon, p.city_key AS "cityKey", p.city_name AS "cityName",
+/** GA-yyyymmdd-#: the Asia/Manila day it was saved and its place in that day's lineup */
+export const reportId = (day: number, no: number) => `GA-${day}-${no}`;
+
+/** today in Asia/Manila as yyyymmdd; `now()` is the transaction's time, the same moment as `created_at` */
+const TODAY_SQL = `to_char(now() AT TIME ZONE 'Asia/Manila', 'YYYYMMDD')::int`;
+
+const SELECT = `SELECT p.id, p.report_no AS "reportNo", p.report_day AS "reportDay", p.day_no AS "dayNo", p."name", p.lat, p.lon, p.city_key AS "cityKey", p.city_name AS "cityName",
        p.region_psgc AS "regionPsgc", p.province_psgc AS "provincePsgc", p.area_level AS "areaLevel",
        p.area_code AS "areaCode", p.area_name AS "areaName", p.limit_minutes AS "limitMinutes", p.status,
        p.snapshot, p.created_at AS "createdAt", p.author_id AS "authorId", u.name AS "authorName", u.role AS "authorRole",
@@ -34,7 +40,10 @@ export class ProposalsService {
   ) {}
 
   /** Who may read a proposal: its author, Certification Office, and the office whose region or province the pin is in. */
-  private canSee(user: AuthUser, p: { authorId: string; regionPsgc: string | null; provincePsgc: string | null }): boolean {
+  private canSee(
+    user: AuthUser,
+    p: { authorId: string; regionPsgc: string | null; provincePsgc: string | null },
+  ): boolean {
     if (p.authorId === user.id || user.role === Role.CO) return true;
     if (user.role === Role.RO) return !!p.regionPsgc && p.regionPsgc.trim() === user.regionPsgc?.trim();
     return !!p.provincePsgc && p.provincePsgc.trim() === user.provincePsgc?.trim();
@@ -45,6 +54,7 @@ export class ProposalsService {
     return {
       id: r.id,
       reportNo: Number(r.reportNo),
+      reportId: reportId(Number(r.reportDay), Number(r.dayNo)),
       name: r.name,
       cityKey: r.cityKey,
       cityName: r.cityName,
@@ -78,29 +88,41 @@ export class ProposalsService {
   async create(user: AuthUser, dto: WhatIfDto): Promise<ProposalDto> {
     const result = await this.sim.whatIfReport(user, dto);
     const [where] = result.pin.cityKey
-      ? await this.db.query(`SELECT region_psgc, province_psgc FROM cities WHERE key = $1`, [result.pin.cityKey])
+      ? await this.db.query(`SELECT region_psgc, province_psgc FROM cities WHERE key = $1`, [
+          result.pin.cityKey,
+        ])
       : [];
-    const name = (dto.name?.trim() || `New center in ${result.pin.cityName ?? 'selected location'}`).slice(0, 120);
-    const [{ id }] = await this.db.query(
-      `INSERT INTO proposals (author_id, name, lat, lon, city_key, city_name, region_psgc, province_psgc,
-                              area_level, area_code, area_name, limit_minutes, snapshot)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb) RETURNING id`,
-      [
-        user.id,
-        name,
-        dto.lat,
-        dto.lon,
-        result.pin.cityKey,
-        result.pin.cityName,
-        where?.region_psgc ?? null,
-        where?.province_psgc ?? null,
-        result.area.level,
-        result.area.code,
-        result.area.name,
-        result.limitMinutes,
-        JSON.stringify(result),
-      ],
+    const name = (dto.name?.trim() || `New center in ${result.pin.cityName ?? 'selected location'}`).slice(
+      0,
+      120,
     );
+    // the next number in today's lineup; the lock makes two saves at the same moment take turns
+    const id = await this.db.transaction(async (tx) => {
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('proposals.day_no'))`);
+      const [row] = await tx.query(
+        `INSERT INTO proposals (author_id, name, lat, lon, city_key, city_name, region_psgc, province_psgc,
+                                area_level, area_code, area_name, limit_minutes, snapshot, report_day, day_no)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb, ${TODAY_SQL},
+                 (SELECT COALESCE(max(day_no), 0) + 1 FROM proposals WHERE report_day = ${TODAY_SQL}))
+         RETURNING id`,
+        [
+          user.id,
+          name,
+          dto.lat,
+          dto.lon,
+          result.pin.cityKey,
+          result.pin.cityName,
+          where?.region_psgc ?? null,
+          where?.province_psgc ?? null,
+          result.area.level,
+          result.area.code,
+          result.area.name,
+          result.limitMinutes,
+          JSON.stringify(result),
+        ],
+      );
+      return row.id as string;
+    });
     return this.get(user, id);
   }
 
@@ -120,7 +142,8 @@ export class ProposalsService {
   async rename(user: AuthUser, id: string, dto: RenameProposalDto): Promise<ProposalSummaryDto> {
     const [r]: Row[] = await this.db.query(`${SELECT} WHERE p.id = $1`, [id]);
     if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
-    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Certification Office can rename a proposal');
+    if (r.authorId !== user.id && user.role !== Role.CO)
+      throw new ForbiddenException('Only the author or Certification Office can rename a proposal');
     await this.db.query(`UPDATE proposals SET name = $2 WHERE id = $1`, [id, dto.name]);
     return this.summary(user, { ...r, name: dto.name });
   }
@@ -129,7 +152,8 @@ export class ProposalsService {
   async remove(user: AuthUser, id: string): Promise<void> {
     const [r]: Row[] = await this.db.query(`${SELECT} WHERE p.id = $1`, [id]);
     if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
-    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Certification Office can delete a proposal');
+    if (r.authorId !== user.id && user.role !== Role.CO)
+      throw new ForbiddenException('Only the author or Certification Office can delete a proposal');
     await this.db.query(`DELETE FROM proposals WHERE id = $1`, [id]);
   }
 }

@@ -12,9 +12,16 @@ export class Proposal {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  /** short report number (RPT-0001 on the Reports page), assigned in save order */
+  /** running number over all proposals, in save order */
   @Column({ name: 'report_no', type: 'integer', generatedIdentity: 'BY DEFAULT', unique: true })
   reportNo: number;
+
+  /** the Asia/Manila day it was saved, as yyyymmdd, and its place in that day's lineup: report GA-yyyymmdd-# */
+  @Column({ name: 'report_day', type: 'integer' })
+  reportDay: number;
+
+  @Column({ name: 'day_no', type: 'integer' })
+  dayNo: number;
 
   @Index('IDX_proposals_author')
   @Column({ name: 'author_id', type: 'uuid' })
