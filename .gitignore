@@ -6,3 +6,5 @@ data/raw/
 *.log
 data/osm/
 qa-travel-spotcheck.csv
+.vscode/
+api.http

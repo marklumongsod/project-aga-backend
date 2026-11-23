@@ -66,6 +66,23 @@ describe('UtilizationEngine (reach and deserts)', () => {
     expect(r.totals.candidates).toBe(16);
   });
 
+  it('counts each city toward every center it can reach, but assigns it only to the nearest', () => {
+    const e = new UtilizationEngine([center(1, 15.0), center(2, 15.1)], opts);
+    const r = e.run([group('a', 15.0, 10)]);
+    expect(r.centers.get(1)).toMatchObject({ demand: 10, reach: 10 });
+    expect(r.centers.get(2)).toMatchObject({ demand: 0, reach: 10 });
+    // reach overlaps: both centers can serve the same candidates, so it is not a partition
+    expect(r.centers.get(1)!.reach + r.centers.get(2)!.reach).toBeGreaterThan(r.totals.candidates);
+  });
+
+  it('gives an unreachable center zero reach, and demand never exceeds reach', () => {
+    const e = new UtilizationEngine([center(1, 15.4)], opts); // ~44.5 km, ~103 min by the estimate
+    const r = e.run([group('a', 15.0, 4)]);
+    expect(r.centers.get(1)).toMatchObject({ demand: 0, reach: 0 });
+    expect(r.groups.get('a')!.flagged).toBe(4);
+    for (const c of r.centers.values()) expect(c.demand).toBeLessThanOrEqual(c.reach);
+  });
+
   it('lists the reachable centers nearest first, and is repeatable', () => {
     const e = new UtilizationEngine([center(2, 15.2), center(1, 15.1)], opts);
     const from = { key: 'a', ...at(15.0), islandId: 1 };
@@ -85,7 +102,9 @@ describe('engine with a routed travel model', () => {
     const e = new UtilizationEngine([center(1, 15.01), center(2, 15.2)], { ...opts, travel: matrixLike });
     const r = e.run([group('a', 15.0, 5)]);
     expect(r.centers.get(1)!.demand).toBe(0);
+    expect(r.centers.get(1)!.reach).toBe(0);
     expect(r.centers.get(2)!.demand).toBe(5);
+    expect(r.centers.get(2)!.reach).toBe(5);
     expect(r.groups.get('a')!.flagged).toBe(0);
   });
 

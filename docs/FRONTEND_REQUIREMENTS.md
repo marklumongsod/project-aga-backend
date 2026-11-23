@@ -141,12 +141,12 @@ All parameters are optional. Omit them to get the user's home area. `level` is `
                             "candidates": "BSRS completed per city (…)",
                             "centers": "assessment centers listed by the TESDA Assessor Coverage API (synced nightly)" } },
   "area": { "level": "PROVINCE", "code": "0604500000", "name": "Negros Occidental", "parentCode": "0600000000",
-            "candidates": 35185, "flagged": 5675, "flaggedShare": 0.161, "centers": 40,
-            "densityBand": 0, "desertLevel": 4, "desertCities": 5, "desertCandidates": 5675,
+            "candidates": 35185, "flagged": 5675, "served": 29510, "flaggedShare": 0.161, "serviceRate": 0.8387,
+            "centers": 40, "densityBand": 0, "desertLevel": 4, "desertCities": 5, "desertCandidates": 5675,
             "estimatedCandidates": 0, "nearestMinutes": null },
   "childLevel": "CITY",
   "top":  [ { "level": "CITY", "code": "0604506000", "name": "Candoni", "candidates": 1135,
-              "flagged": 1135, "flaggedShare": 1, "centers": 0, "densityBand": 0,
+              "flagged": 1135, "served": 0, "flaggedShare": 1, "serviceRate": 0, "centers": 0, "densityBand": 0,
               "desertLevel": 4, "desertCities": 1, "desertCandidates": 1135,
               "estimatedCandidates": 1135, "nearestMinutes": null, "rank": 1 } ],
   "rows": [ /* every child area, same shape, worst first */ ],
@@ -159,8 +159,8 @@ All parameters are optional. Omit them to get the user's home area. `level` is `
 
 Rules:
 - **`parentCode`** is what an area sits in (a province's region, a city's province; `null` for a region or the country). Use it to fill the Region and Province pickers and the back buttons when the link has no `?region=`.
-- **Shares are fractions** (`0.161` = 16.1%). `flaggedShare` always shows one decimal. `centers: 0` means the area has no center of its own → show "No center" (PO Top 3 "Status" column).
-- **There is no utilization rate, service rate, slot count, "centers full" or candidates-to-slots ratio** anywhere in the API. Don't build them.
+- **Shares are fractions** (`0.161` = 16.1%). `flaggedShare` and `serviceRate` always show one decimal. `centers: 0` means the area has no center of its own → show "No center" (PO Top 3 "Status" column).
+- **The service rate is reach-based access**, not capacity: `serviceRate = (candidates - flagged) / candidates`. There is **no utilization rate, slot count, "centers full" or candidates-to-slots ratio** anywhere in the API. Don't build them.
 - Every `limitMinutes` request (`?limitMinutes=`, 10 to 180) returns the same shape; `run.assumptions.limitMinutes` is the limit that was used. Anything outside 10 to 300, or not a whole number, is `400`.
 - Flagged candidates are exactly the candidates in desert cities (no center in reach), so `flagged` equals `desertCandidates` at every level.
 - `top` is already Top 5 regions (national) or Top 3 provinces/cities (region/province), worst first. Don't re-rank. Read each item's `level` for the title.
@@ -497,5 +497,5 @@ Built on top of §1-§14 and covered by the browser tests. Expected values in th
 10. **Basemap**: the dashboard, planner and finder maps sit on a full-colour OpenStreetMap basemap (OpenFreeMap "liberty": blue sea, green forest and grass, roads and place names), with the blue and green deepened a little in `baseStyle.ts`. The area colours are laid over the land, forest and parks but **under** the rivers, lakes, roads, buildings, boundaries and place names, so that detail stays visible on red. Areas in the "not a desert" class are left unpainted so the real map shows through; the density view paints every class. If the basemap can't load, a plain ocean-blue background is used. The map credit (OpenStreetMap, OpenFreeMap, OpenMapTiles) is required by their licences and must stay on every map; it starts collapsed behind the small "i" button (`collapseAttribution` in `map/setup.ts`) and opens on a click.
 11. **No selected-area chip.** Picking an area highlights its row in the table and on the map; nothing extra is shown in the map header.
 12. **Number formats** follow §12: flagged shares always have one decimal.
-13. **Utilization and service rate removed**: the utilization rate, then the service rate, were removed from the API and the UI. So were slots, "centers full" and the candidates-to-slots ratio. Don't reintroduce them without asking the backend team.
+13. **Utilization removed; reach-based service rate added**: there is still no utilization rate, slot count, "centers full" or candidates-to-slots ratio. A reach-based `serviceRate` (served ÷ candidates; center: predicted candidates ÷ reach) is exposed instead. Don't treat it as capacity.
 
