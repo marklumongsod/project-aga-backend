@@ -19,6 +19,7 @@ docker compose up -d db           # PostgreSQL 16 + PostGIS
 npm ci
 npm run db:setup                  # migrations + seed (geography, demo accounts) + TESDA API sync (centers, candidates) + data-quality recovery
 npm run simulate                  # first simulation run (then daily at SIM_CRON)
+npm run demo:utilization -- --quarter=2026-Q4   # optional: demo slots + candidates for the capacity view
 npm run start:dev                 # http://localhost:3000/api/v1, docs at http://localhost:3000/docs
 ```
 
@@ -49,10 +50,11 @@ npm run lint        # type-check
 | GET | `/api/auth/callback` (unversioned) | public | SSOPortal's return address in the TESDA Gateway format (`<gw>/aga/api/auth/callback`, like EBET's `<gw>/ebet/api/auth/callback`): 302 to the frontend's `/sso/callback` with `code` and `state` (or `error`). 501 while `T2MIS_SSO_ISSUER` is empty |
 | POST | `/auth/sso/t2mis` | public | `{ code, codeVerifier }` from the SSOPortal redirect → JWT (same shape as `/auth/login`). Creates or refreshes the account from the T2MIS claims |
 | GET | `/auth/me` | office | User and area scope |
-| GET | `/dashboard/overview?level=&code=&limitMinutes=` | office | KPIs, Top 5 / Top 3, all child areas. Defaults to the user's home area |
-| GET | `/dashboard/map` | office | GeoJSON choropleth of child areas (`desertLevel`, `densityBand` and `flaggedShare` per area, plus the desert and density legends) |
-| GET | `/dashboard/centers` | office | Centers in the area: predicted candidates |
+| GET | `/dashboard/overview?level=&code=&limitMinutes=&qualification=&quarter=` | office | KPIs, Top 5 / Top 3, all child areas. Add `qualification` + `quarter` for capacity utilization |
+| GET | `/dashboard/map` | office | GeoJSON choropleth of child areas (`desertLevel`, `densityBand`, `flaggedShare`; with `qualification`+`quarter`: `utilization`, `utilizationBand` and `utilizationLegend`) |
+| GET | `/dashboard/centers` | office | Centers in the area: predicted candidates; with `qualification`+`quarter`: slots, assigned, utilization |
 | GET | `/centers/:id` | office | Center card: qualifications, predicted candidates |
+| GET | `/centers/:id/utilization?quarter=` | office | Capacity utilization per qualification the center offers |
 | GET | `/centers/:id/reach` | office | Cities by travel time to the center (the fallback when there is no routing) |
 | GET | `/centers/:id/isochrone` | office | True drive-time polygons (30 / 60 / 90 minutes) from OSRM road and ferry routing; 503 without routing |
 | GET | `/simulation/snap?lat=&lon=&level=&code=` | office | Move a hand-placed pin onto the nearest road (within 5 km, inside the area), or leave it where it is |
@@ -81,7 +83,7 @@ Public responses never include learner data, candidate counts or flagged counts.
 
 ## Reach, flagged candidates and deserts
 
-Implemented in `src/simulation/engine/utilization-engine.ts` (pure, unit-tested). There is no capacity model: slots are not counted.
+Implemented in `src/simulation/engine/utilization-engine.ts` (pure, unit-tested). The regular run counts reach, not slots. A separate capacity view (`?qualification=&quarter=`) adds slots and utilization.
 
 ```
 for each city (a group of candidates):
@@ -96,6 +98,22 @@ flagged share = flagged / candidates
 - Centers are listed **nearest-first** by travel time.
 - **Predicted candidates** for a center = candidates whose nearest reachable center it is.
 - A flagged candidate is therefore one with no center in reach, so flagged candidates equal the candidates in desert cities.
+
+### Capacity utilization (per center and qualification, per quarter)
+
+Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity run assigns each qualification's candidates to the **nearest accredited center with an open slot within 90 minutes**; if that center is full, overflow goes to the next reachable center. Anyone left is flagged.
+
+- Slots are stored monthly in `center_qualification_slots`: one row per center × qualification × month. A quarter is the sum of its three months.
+- The local demo rule is **20 slots per program per center per month** (60 per quarter).
+- `utilization = candidates wanting the center ÷ quarter slots` (can exceed 100%).
+- `assigned` = candidates actually placed in an open slot; `serviceRate = assigned ÷ candidates`.
+- `/centers/:id/utilization?quarter=2026-Q4` lists every qualification the center offers.
+- `utilizationLegend` is returned with the dashboard/map (green → red, text labels).
+- Demo data:
+  ```bash
+  npm run demo:utilization -- --quarter=2026-Q4
+  ```
+  If staging already has real TESDA graduates, only slots are generated; otherwise demo candidates are added too. Demo rows are marked `source = 'demo'`.
 
 ### Assessment deserts, hotspots and density (team doc)
 

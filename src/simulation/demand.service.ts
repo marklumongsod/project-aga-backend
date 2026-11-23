@@ -52,12 +52,14 @@ export class DemandService {
   }
 
   /** Upcoming graduates per qualification (matched by name, so "Driving II" and "DRIVING NC II" are one), counts only. */
-  async qualificationCatalog(): Promise<QualificationCatalog> {
+  async qualificationCatalog(range?: { start: number; end: number }): Promise<QualificationCatalog> {
     const cities = await this.cities();
     const rows: Array<{ province_psgc: string; city_key: string | null; qualification: string; graduates: number }> = await this.db.query(
       `SELECT g.province_psgc, c.key AS city_key, g.qualification, sum(g.graduates)::int AS graduates
          FROM upcoming_graduates g LEFT JOIN cities c ON c.id = g.city_id
+        ${range ? 'WHERE g.finish_month >= $1 AND g.finish_month < $2' : ''}
         GROUP BY 1, 2, 3`,
+      range ? [range.start, range.end] : [],
     );
     const byKey = new Map<string, QualificationDemand>();
     const nameCount = new Map<string, Map<string, number>>();

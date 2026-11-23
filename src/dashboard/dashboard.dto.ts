@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { AreaLevel } from '../database/entities';
 import { MAX_LIMIT_MINUTES, MIN_LIMIT_MINUTES } from '../simulation/limits';
 
@@ -39,6 +39,12 @@ export class DashboardQueryDto extends AreaQueryDto {
   @IsString()
   @MaxLength(160)
   qualification?: string;
+
+  /** Calendar quarter for capacity utilization, e.g. 2026-Q4. Needs `qualification`. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-Q[1-4]$/, { message: 'quarter must look like 2026-Q4' })
+  quarter?: string;
 }
 
 export class QualificationOptionDto {
@@ -60,6 +66,20 @@ export class AreaStatsDto {
   flagged: number;
   /** flagged / candidates */
   flaggedShare: number;
+  /** capacity fields; null outside a qualification + quarter run */
+  @ApiProperty({ nullable: true, example: 60 })
+  slots: number | null;
+  @ApiProperty({ nullable: true, example: 45 })
+  assigned: number | null;
+  /** candidates / slots; above 1 means demand exceeds capacity */
+  @ApiProperty({ nullable: true, example: 1.5 })
+  utilization: number | null;
+  /** assigned / candidates */
+  @ApiProperty({ nullable: true, example: 0.75 })
+  serviceRate: number | null;
+  /** band from the utilization legend; null outside a capacity run */
+  @ApiProperty({ nullable: true, example: 4 })
+  utilizationBand: number | null;
   /** assessment centers in the area */
   centers: number;
   /** density class of this area among its siblings (see densityLegend): 0..n, the highest is the hotspot; -1 = no candidates */
@@ -114,6 +134,8 @@ export class DesertSummaryDto {
 
 export class OverviewDto {
   run: RunRefDto;
+  quarter: string | null;
+  qualification: string | null;
   area: AreaStatsDto;
   @ApiProperty({ enum: AreaLevel })
   childLevel: AreaLevel;
@@ -130,4 +152,7 @@ export class OverviewDto {
   /** legend for the density view of the map: band = AreaStatsDto.densityBand */
   @ApiProperty({ type: () => [LegendBandDto] })
   densityLegend: ReadonlyArray<LegendBandDto>;
+  /** legend for the utilization view; only present on a qualification + quarter run */
+  @ApiProperty({ type: () => [LegendBandDto], nullable: true })
+  utilizationLegend: ReadonlyArray<LegendBandDto> | null;
 }

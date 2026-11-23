@@ -2,6 +2,7 @@ import { City, Province, Region } from './geography.entity';
 import {
   AssessmentCenter,
   CenterQualification,
+  CenterQualificationSlot,
   TesdaSync,
   UpcomingGraduates,
 } from './t2mis.entity';
@@ -22,6 +23,7 @@ export const ENTITIES = [
   City,
   AssessmentCenter,
   CenterQualification,
+  CenterQualificationSlot,
   UpcomingGraduates,
   TesdaSync,
   User,

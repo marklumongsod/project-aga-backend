@@ -20,6 +20,7 @@
     "db:migrate": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "db:seed": "ts-node --transpile-only src/database/seed.ts",
     "simulate": "ts-node --transpile-only src/cli/simulate.ts",
+    "demo:utilization": "ts-node --transpile-only src/cli/demo-utilization.ts",
     "tesda:sync": "ts-node --transpile-only src/cli/sync-tesda.ts",
     "travel:build": "ts-node --transpile-only src/cli/build-travel-matrix.ts",
     "etl": "python3 -I etl/build_seed.py",

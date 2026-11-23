@@ -56,6 +56,10 @@ export class SimulationRun {
   @Column({ name: 'qualification_key', type: 'varchar', nullable: true })
   qualificationKey: string | null;
 
+  /** quarter_start epoch seconds for a capacity run; null for the regular, all-qualification simulation */
+  @Column({ name: 'quarter_start', type: 'bigint', nullable: true, transformer: epochTransformer })
+  quarterStart: number | null;
+
   @Column({ name: 'started_at', type: 'bigint', default: () => EPOCH_NOW_SQL, transformer: epochTransformer })
   startedAt: number;
 
@@ -103,6 +107,21 @@ export class AreaUtilization {
   @Column({ name: 'flagged_share', type: 'double precision' })
   flaggedShare: number;
 
+  /** capacity fields; null on the regular all-qualification run */
+  @Column({ type: 'int', nullable: true })
+  slots: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  assigned: number | null;
+
+  /** candidates / slots (can exceed 1); null when there are no slots */
+  @Column({ type: 'double precision', nullable: true })
+  utilization: number | null;
+
+  /** assigned / candidates; null outside a capacity run */
+  @Column({ name: 'service_rate', type: 'double precision', nullable: true })
+  serviceRate: number | null;
+
   /** cities: assessment desert level 1-4 by candidates, 0 = not a desert; larger areas: the highest level inside */
   @Column({ name: 'desert_level', type: 'smallint', default: 0 })
   desertLevel: number;
@@ -143,4 +162,19 @@ export class CenterUtilization {
   /** predicted candidates: those whose nearest reachable center is this one */
   @Column({ type: 'int' })
   demand: number;
+
+  /** capacity fields; null on the regular all-qualification run */
+  @Column({ type: 'int', nullable: true })
+  slots: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  assigned: number | null;
+
+  /** demand / slots (can exceed 1); null when there are no slots */
+  @Column({ type: 'double precision', nullable: true })
+  utilization: number | null;
+
+  /** assigned / demand; null outside a capacity run */
+  @Column({ name: 'service_rate', type: 'double precision', nullable: true })
+  serviceRate: number | null;
 }
