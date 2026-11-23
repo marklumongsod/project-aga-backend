@@ -126,6 +126,11 @@ export function displayName(c: Record<string, unknown>): string {
   return full || (name && !EMAIL.test(name) ? name : '') || name || str(c.preferred_username) || 'T2MIS user';
 }
 
+/** First, middle and last name from the claims, each null when SSOPortal didn't send it. */
+export function nameParts(c: Record<string, unknown>): { firstName: string | null; middleName: string | null; lastName: string | null } {
+  return { firstName: str(c.FirstName) || null, middleName: str(c.MiddleName) || null, lastName: str(c.LastName) || null };
+}
+
 /** The account email: the `email` claim, else `name` / `preferred_username` when it is an email (SSOPortal sends no `email`). */
 export function claimEmail(c: Record<string, unknown>): string | null {
   const found = [str(c.email), str(c.name), str(c.preferred_username)].find((v) => EMAIL.test(v));

@@ -14,6 +14,16 @@ export class User {
   @Column()
   name: string;
 
+  /** name parts from T2MIS SSO (null for other accounts): reports print "Surname, First Name MI" */
+  @Column({ name: 'first_name', type: 'varchar', nullable: true })
+  firstName: string | null;
+
+  @Column({ name: 'middle_name', type: 'varchar', nullable: true })
+  middleName: string | null;
+
+  @Column({ name: 'last_name', type: 'varchar', nullable: true })
+  lastName: string | null;
+
   /** null for SSO-only accounts */
   @Column({ name: 'password_hash', type: 'varchar', nullable: true, select: false })
   passwordHash: string | null;

@@ -28,8 +28,10 @@ import {
   SnapQueryDto,
   SnapResultDto,
   WhatIfDto,
+  WhatIfReportDto,
   WhatIfResultDto,
 } from './simulation.dto';
+import { ReportAreaRef, areaKey, reportFigures, reportMonths } from './report-figures';
 import { haversineKm } from '../common/geo/haversine';
 import { desertLevel, isoBand } from '../common/rate-band';
 import { MatrixTravelTimeModel, pairKey } from './travel/matrix-travel-time.model';
@@ -838,6 +840,89 @@ export class SimulationService {
   }
 
   async whatIf(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
+    return (await this.runWhatIf(user, dto)).result;
+  }
+
+  /**
+   * The what-if plus what a proposal report needs (stored with the proposal, so the report shows the figures of the
+   * day it was saved): month-by-month flagged, deserts and utilization for the region, province and (Central Office)
+   * nationwide; the data version; and the deserts of the pin's province before and after, for the maps.
+   */
+  async whatIfReport(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {
+    const { result, before, after, inputs, where } = await this.runWhatIf(user, dto);
+    const months = reportMonths(nowEpoch());
+    const refs: ReportAreaRef[] = [];
+    for (const a of [result.area, ...result.placeAreas, ...(user.role === Role.CO ? [result.national] : [])]) {
+      if (a.level !== AreaLevel.CITY && !refs.some((r) => r.level === a.level && r.code === a.code))
+        refs.push({ level: a.level as ReportAreaRef['level'], code: a.code, name: a.level === AreaLevel.NATIONAL ? 'Nationwide' : a.name });
+    }
+    const order = { REGION: 0, PROVINCE: 1, NATIONAL: 2 } as const;
+    refs.sort((a, b) => order[a.level] - order[b.level]);
+    const unreached = (r: EngineResult) =>
+      new Set(inputs.current.filter((g) => r.groups.get(g.key)?.nearestMinutes === null).map((g) => g.key));
+    const unreachedBefore = unreached(before);
+    const unreachedAfter = unreached(after);
+
+    // slots per month and area; the proposed center is assumed to have a typical nearby center's slots
+    const slotRows: Array<{ month: string; region_psgc: string | null; province_psgc: string | null; slots: number; centers: number }> =
+      await this.db.query(
+        `SELECT s.month_start AS month, c.region_psgc, c.province_psgc, sum(s.slots)::int AS slots, count(DISTINCT s.center_id)::int AS centers
+           FROM center_qualification_slots s JOIN assessment_centers c ON c.id = s.center_id
+          WHERE c.include_in_analysis AND s.month_start = ANY($1::bigint[])
+          GROUP BY 1, 2, 3`,
+        [months],
+      );
+    const slots = new Map<number, Map<string, number>>();
+    const pinSlots = new Map<number, number>();
+    for (const m of months) {
+      const rows = slotRows.filter((r) => Number(r.month) === m);
+      if (!rows.length) continue;
+      const tally = (keep: (r: (typeof rows)[number]) => boolean) =>
+        rows.filter(keep).reduce((t, r) => ({ slots: t.slots + r.slots, centers: t.centers + r.centers }), { slots: 0, centers: 0 });
+      const perArea = new Map<string, number>();
+      for (const a of refs)
+        perArea.set(
+          areaKey(a),
+          tally((r) => a.level === 'NATIONAL' || (a.level === 'REGION' ? r.region_psgc === a.code : r.province_psgc === a.code)).slots,
+        );
+      slots.set(m, perArea);
+      const typical = [
+        tally((r) => !!where?.province_psgc && r.province_psgc === where.province_psgc),
+        tally((r) => !!where?.region_psgc && r.region_psgc === where.region_psgc),
+        tally(() => true),
+      ].find((t) => t.centers > 0);
+      if (typical) pinSlots.set(m, Math.round(typical.slots / typical.centers));
+    }
+
+    const [sync] = await this.db.query(`SELECT max(finished_at) AS at FROM tesda_syncs WHERE status = 'COMPLETED'`);
+    const deserts = (unreachedSet: Set<string>) =>
+      inputs.current.filter((g) => g.provincePsgc === where?.province_psgc && g.count > 0 && unreachedSet.has(g.key)).map((g) => g.key);
+    const report: WhatIfReportDto = {
+      dataUpdatedAt: sync?.at ? Number(sync.at) : null,
+      months,
+      areas: reportFigures({
+        areas: refs,
+        cities: inputs.current,
+        months,
+        candidates: await this.demand.monthlyCounts(months),
+        unreachedBefore,
+        unreachedAfter,
+        slots,
+        pinSlots,
+      }),
+      map: where?.province_psgc
+        ? {
+            provincePsgc: where.province_psgc,
+            provinceName: where.province_name ?? where.province_psgc,
+            desertsBefore: deserts(unreachedBefore),
+            desertsAfter: deserts(unreachedAfter),
+          }
+        : null,
+    };
+    return { ...result, report };
+  }
+
+  private async runWhatIf(user: AuthUser, dto: WhatIfDto) {
     const { planArea, where, pin } = await this.placePin(user, dto);
     const inputs = await this.loadInputs();
     const limitMinutes = dto.limitMinutes ?? this.limits.limitMinutes;
@@ -907,12 +992,16 @@ export class SimulationService {
       return out;
     };
     const pinRes = after.centers.get(-1)!;
-    return {
+    const result: WhatIfResultDto = {
       pin: {
         lat: dto.lat,
         lon: dto.lon,
         cityKey: where?.key ?? null,
         cityName: where?.name ?? null,
+        provincePsgc: where?.province_psgc ?? null,
+        provinceName: where?.province_name ?? null,
+        regionPsgc: where?.region_psgc ?? null,
+        regionName: where?.region_name ?? null,
       },
       newlyServed: before.totals.flagged - after.totals.flagged,
       pinDemand: pinRes.demand,
@@ -922,5 +1011,6 @@ export class SimulationService {
       placeAreas: placeAreas(),
       improvedCities: improved.slice(0, 50),
     };
+    return { result, before, after, inputs, where };
   }
 }

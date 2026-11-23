@@ -10,13 +10,21 @@ import { ProposalDto, ProposalSummaryDto, RenameProposalDto } from './proposals.
 interface Row extends Proposal {
   authorName: string;
   authorRole: string;
+  authorFirstName: string | null;
+  authorMiddleName: string | null;
+  authorLastName: string | null;
+  authorAreaName: string | null;
 }
 
 const SELECT = `SELECT p.id, p.report_no AS "reportNo", p."name", p.lat, p.lon, p.city_key AS "cityKey", p.city_name AS "cityName",
        p.region_psgc AS "regionPsgc", p.province_psgc AS "provincePsgc", p.area_level AS "areaLevel",
        p.area_code AS "areaCode", p.area_name AS "areaName", p.limit_minutes AS "limitMinutes", p.status,
-       p.snapshot, p.created_at AS "createdAt", p.author_id AS "authorId", u.name AS "authorName", u.role AS "authorRole"
-  FROM proposals p JOIN users u ON u.id = p.author_id`;
+       p.snapshot, p.created_at AS "createdAt", p.author_id AS "authorId", u.name AS "authorName", u.role AS "authorRole",
+       u.first_name AS "authorFirstName", u.middle_name AS "authorMiddleName", u.last_name AS "authorLastName",
+       COALESCE(ap.name, ar.name) AS "authorAreaName"
+  FROM proposals p JOIN users u ON u.id = p.author_id
+  LEFT JOIN provinces ap ON ap.psgc = u.province_psgc
+  LEFT JOIN regions ar ON ar.psgc = u.region_psgc`;
 
 @Injectable()
 export class ProposalsService {
@@ -49,6 +57,10 @@ export class ProposalsService {
       status: r.status,
       authorName: r.authorName,
       authorRole: r.authorRole,
+      authorFirstName: r.authorFirstName,
+      authorMiddleName: r.authorMiddleName,
+      authorLastName: r.authorLastName,
+      authorAreaName: r.authorAreaName,
       createdAt: Number(r.createdAt),
       newlyServed: result.newlyServed,
       desertCitiesClosed: result.area.desertCitiesBefore - result.area.desertCitiesAfter,
@@ -64,7 +76,7 @@ export class ProposalsService {
    * client can't save numbers it made up.
    */
   async create(user: AuthUser, dto: WhatIfDto): Promise<ProposalDto> {
-    const result = await this.sim.whatIf(user, dto);
+    const result = await this.sim.whatIfReport(user, dto);
     const [where] = result.pin.cityKey
       ? await this.db.query(`SELECT region_psgc, province_psgc FROM cities WHERE key = $1`, [result.pin.cityKey])
       : [];

@@ -74,6 +74,61 @@ export class WhatIfPinDto {
   lon: number;
   cityKey: string | null;
   cityName: string | null;
+  /** the province and region the pin is in (absent on proposals saved before these were added) */
+  provincePsgc?: string | null;
+  provinceName?: string | null;
+  regionPsgc?: string | null;
+  regionName?: string | null;
+}
+
+/** One period of a report area: candidates finishing in it, flagged and deserts, slots and utilization, before / after. */
+export class ReportPeriodDto {
+  candidates: number;
+  flaggedBefore: number;
+  flaggedAfter: number;
+  desertsBefore: number;
+  desertsAfter: number;
+  /** slots of the area's centers in the period; null = no slot data */
+  slots: number | null;
+  /** slots the proposed center is assumed to add (a typical center nearby); null = no slot data */
+  pinSlots: number | null;
+  /** candidates ÷ slots without / with the proposed center; null = no slots */
+  utilizationBefore: number | null;
+  utilizationAfter: number | null;
+}
+
+export class ReportAreaDto {
+  @ApiProperty({ example: 'PROVINCE' })
+  level: string;
+  code: string;
+  name: string;
+  /** one per month in `months` (index 0 = the current month) */
+  @ApiProperty({ type: () => [ReportPeriodDto] })
+  months: ReportPeriodDto[];
+  /** months 1-3 together */
+  @ApiProperty({ type: () => ReportPeriodDto })
+  next3: ReportPeriodDto;
+}
+
+/** The assessment deserts of the pin's province before / after the proposed center (city keys), for the report maps. */
+export class ReportMapDto {
+  provincePsgc: string;
+  provinceName: string;
+  desertsBefore: string[];
+  desertsAfter: string[];
+}
+
+/** Extra figures stored with a saved proposal for its report. */
+export class WhatIfReportDto {
+  /** when the center and graduate data were last synced from the TESDA API (epoch seconds); null = never */
+  dataUpdatedAt: number | null;
+  /** Asia/Manila month starts (epoch seconds): the current month, then months 1-3 */
+  months: number[];
+  /** region, province and (Central Office) nationwide, as far as the office may see */
+  @ApiProperty({ type: () => [ReportAreaDto] })
+  areas: ReportAreaDto[];
+  @ApiPropertyOptional({ type: () => ReportMapDto, nullable: true })
+  map: ReportMapDto | null;
 }
 
 export class ImprovedCityDto {
@@ -102,6 +157,9 @@ export class WhatIfResultDto {
   /** cities whose flagged candidates went down */
   @ApiProperty({ type: () => [ImprovedCityDto] })
   improvedCities: ImprovedCityDto[];
+  /** saved proposals only: month-by-month figures, the data version and the desert maps for the report */
+  @ApiPropertyOptional({ type: () => WhatIfReportDto })
+  report?: WhatIfReportDto;
 }
 
 /** Where to open a new center: the area to look in (default: the user's home area), the travel limit, how many sites. */

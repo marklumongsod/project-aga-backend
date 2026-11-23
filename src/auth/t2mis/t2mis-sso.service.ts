@@ -9,6 +9,7 @@ import {
   AreaLookup,
   claimEmail,
   displayName,
+  nameParts,
   frontendCallbackUrl,
   normalizeRoles,
   parseRoleMap,
@@ -91,6 +92,7 @@ export class T2misSsoService {
     const fields = {
       t2misUserId: sub,
       name: displayName(claims),
+      ...nameParts(claims),
       role: scope.scope.role,
       regionPsgc: scope.scope.regionPsgc,
       provincePsgc: scope.scope.provincePsgc,

@@ -256,6 +256,36 @@ describe('Project AGA API (e2e)', () => {
       expect(atDesert.body.newlyServed).toBe(atDesert.body.result.newlyServed);
     });
 
+    it('stores what the report needs: place names, month-by-month figures per visible area, data version, desert maps', async () => {
+      const po = (await post('po', SIPALAY).expect(201)).body;
+      expect(po.result.pin).toMatchObject({ provincePsgc: NEGROS_OCC, regionPsgc: '0600000000' });
+      expect(po.result.pin.provinceName).toBeTruthy();
+      expect(po.result.pin.regionName).toBeTruthy();
+      expect(po.authorAreaName).toBeTruthy(); // the PO's province
+      for (const k of ['authorFirstName', 'authorMiddleName', 'authorLastName']) expect(po).toHaveProperty(k);
+      const rep = po.result.report;
+      expect(rep.months).toHaveLength(4);
+      expect(rep.months[1]).toBeGreaterThan(rep.months[0]);
+      // a PO sees its province only; no region, no nationwide
+      expect(rep.areas.map((a: { level: string }) => a.level)).toEqual(['PROVINCE']);
+      const p = rep.areas[0];
+      expect(p.months).toHaveLength(4);
+      expect(p.next3.candidates).toBe(p.months.slice(1).reduce((s: number, m: { candidates: number }) => s + m.candidates, 0));
+      for (const m of [...p.months, p.next3]) {
+        expect(m.flaggedAfter).toBeLessThanOrEqual(m.flaggedBefore);
+        expect(m.desertsAfter).toBeLessThanOrEqual(m.desertsBefore);
+      }
+      expect(rep.map).toMatchObject({ provincePsgc: NEGROS_OCC });
+      expect(rep.map.desertsAfter.length).toBeLessThanOrEqual(rep.map.desertsBefore.length);
+      // Central Office gets region, province and nationwide, in that order
+      const co = (await post('co', SIPALAY).expect(201)).body;
+      expect(co.result.report.areas.map((a: { level: string }) => a.level)).toEqual(['REGION', 'PROVINCE', 'NATIONAL']);
+      expect(co.authorAreaName).toBeNull();
+      // the planner's plain what-if doesn't carry the report part
+      const w = await api().post('/api/v1/simulation/what-if').set(as('po')).send(SIPALAY).expect(200);
+      expect(w.body).not.toHaveProperty('report');
+    });
+
     it('uses the same checks as the what-if: a pin outside the office area or the chosen area is refused', async () => {
       await post('po', CEBU).expect(400);
       await post('po', { ...SIPALAY, level: 'PROVINCE', code: '0305400000' }).expect(403);

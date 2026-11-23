@@ -22,6 +22,12 @@ export class ProposalSummaryDto {
   status: string;
   authorName: string;
   authorRole: string;
+  /** the author's name parts from T2MIS SSO (null for other accounts), for "Prepared by: Surname, First Name MI" */
+  authorFirstName: string | null;
+  authorMiddleName: string | null;
+  authorLastName: string | null;
+  /** the author's office area: the province (PO) or region (RO); null for CO */
+  authorAreaName: string | null;
   /** epoch seconds */
   createdAt: number;
   /** candidates who get a center in reach (nationwide) */

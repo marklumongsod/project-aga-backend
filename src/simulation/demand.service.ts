@@ -100,6 +100,33 @@ export class DemandService {
     return this.groups(cities, towns, provinces);
   }
 
+  /**
+   * Candidates per town for each of `months` (month starts, epoch seconds): the graduates finishing that month, every
+   * qualification, with the same province split as `currentGroups`. For the month-by-month figures of a report.
+   */
+  async monthlyCounts(months: number[]): Promise<Map<number, Map<string, number>>> {
+    const cities = await this.cities();
+    const rows: Array<{ province_psgc: string; city_key: string | null; month: string; graduates: number }> = await this.db.query(
+      `SELECT g.province_psgc, c.key AS city_key, g.finish_month AS month, sum(g.graduates)::int AS graduates
+         FROM upcoming_graduates g LEFT JOIN cities c ON c.id = g.city_id
+        WHERE g.finish_month = ANY($1::bigint[])
+        GROUP BY 1, 2, 3`,
+      [months],
+    );
+    const out = new Map<number, Map<string, number>>();
+    for (const m of months) {
+      const towns = new Map<string, number>();
+      const provinces = new Map<string, number>();
+      for (const r of rows) {
+        if (Number(r.month) !== m) continue;
+        if (r.city_key) towns.set(r.city_key, (towns.get(r.city_key) ?? 0) + r.graduates);
+        else provinces.set(r.province_psgc, (provinces.get(r.province_psgc) ?? 0) + r.graduates);
+      }
+      out.set(m, new Map(this.groups(cities, towns, provinces).map((g) => [g.key, g.count])));
+    }
+    return out;
+  }
+
   private groups(cities: CityRow[], towns: Map<string, number>, provinces: Map<string, number>): DemandGroup[] {
     const byProvince = new Map<string, string[]>();
     for (const c of cities) byProvince.set(c.province_psgc, [...(byProvince.get(c.province_psgc) ?? []), c.key]);
