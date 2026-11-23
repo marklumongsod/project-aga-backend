@@ -20,12 +20,15 @@ npm run db:setup               # migrate + seed (seed data is in database/seed-d
 npm run tesda:sync             # centers, qualifications, upcoming graduates (students list) from the TESDA API (skipped if TESDA hasn't recalculated; -- --force)
 npm run simulate               # first run; the dashboards return 404 until this runs
 npm run demo:utilization       # optional local demo: 20 slots/program/center/month + demo candidates (2026-Q4 by default)
+npm run forecast:import        # import forecast_out/forecasts_<month>.json (see docs/forecast/README.md)
+npm run forecast:map           # rebuild docs/forecast/forecast_places.csv from the raw data + backend geography
+npm run forecast:meta          # write forecast_out/forecast_meta_<month>.json from the model artifact
 # optional real travel times (OSRM): see README "Real travel times"; docker compose --profile routing up -d osrm; npm run travel:build
 npm run start:dev              # http://localhost:3000/api/v1 · Swagger at http://localhost:3000/docs
 
 npm run lint                   # tsc --noEmit (type check; there is no ESLint)
 npm test                       # unit tests: engine + rate bands
-npm run test:e2e               # 25 e2e tests against the seeded DB (runs in band)
+npm run test:e2e               # 137 e2e tests against the seeded DB (runs in band)
 npm run build                  # → dist/
 ```
 
@@ -59,6 +62,7 @@ src/
   scope/area-scope.service.ts  THE place that decides which areas a user may see; use it, don't re-implement
   dashboard/                 /dashboard/overview | map | centers
   centers/                   /centers/:id and /centers/:id/reach
+  forecast/                  /forecasts and /forecasts/meta; monthly Team C ML output, scoped like the dashboard
   simulation/
     engine/utilization-engine.ts   pure TS, no Nest or DB imports. Unit-tested. Keep it pure.
     travel/travel-time.model.ts    TravelTimeModel interface (from: TravelOrigin, to: TravelDest, km) + the estimate model (TRAVEL_TIME_MODEL token)
@@ -112,7 +116,7 @@ The DB check constraint `CHK_users_scope` ties role to scope columns: CO has nei
 - **Assessment deserts** (team doc): a city with candidates and `nearestMinutes === null` (no center within the travel limit by road and ferry). Level 1-4 by candidates (1-20, 21-40, 41-60, 61+: the team doc's 1-200 ... 601+ divided by 10, since those were for the ~13x larger BSRS counts), `desertLevel()` in `rate-band.ts`, stored per area in `area_utilization`. The old dashboard "desert" (no center inside the city) is only a ranking tier now. **Density** = candidates per area in quintiles (`common/density.ts`), hotspot = the densest fifth. **Candidates** are the upcoming TESDA graduates only (every qualification, next 6 months, `upcoming_graduates`); BSRS was dropped (migration `DropBsrsStats`), don't bring it back without asking. ~23% of graduates are placed only in a province: they are split over its towns, 20% evenly, 80% by the towns' own graduates (`splitByGraduates`), and `estimatedCandidates` is that split part of a city's figure (0 above city level). A town with no graduates and no split share has no candidates, so it can't be a desert. A fresh database has no candidates until `tesda:sync` runs.
 - **Centers** come from the TESDA Assessor Coverage API (`src/tesda/`), synced into `assessment_centers` monthly (`TESDA_SYNC_CRON`, 01:45 on the 1st) by the monthly refresh, which also applies the data-quality recovery, routes the changed centers and simulates; the daily simulation uses the last sync. Only `tesda_listed` centers are in the analysis; a center the API stops listing is marked unlisted, not deleted (old results point at it). The seed has no center list: only `center_corrections.json`, Team C's 134 hand-corrected positions (`geocode_override`, `water_fixed_geocode`), which win over the API's raw point. A fresh database has no centers until the sync runs (`db:setup` does it). The API rate-limits (429, no Retry-After): keep requests sequential and paced, and never call it per user request; read the synced tables.
 - **Graduates** come from the API's students list (`GET /api/v1/students/all`, key with the students permission, ~97k rows, ~30 s per deep page). `TesdaClient.upcomingGraduates()` keeps only point, precision, qualification and finish month and sums them as pages arrive; the sync stores counts per town (`precision = 'city'`) or province only (`'province'`, `city_id` null) in `upcoming_graduates`. Never store a student row, barangay or school. A students failure keeps the old figures; the centers still update.
-- **There is no next-quarter forecast.** The Insights tab, the `period` option, NEXT_QUARTER runs, `otherPeriod` and the next-quarter predicted candidates were removed (migration `DropNextQuarter`). `upcoming_graduates` keeps the finish month for a real forecast later (Team C's ML model); today its counts (all months together) are the candidates and the "offer first" list. Don't re-add a forecast without asking.
+- **Assessment candidate forecast** (`/forecasts`, `/forecasts/meta`): the Team C LightGBM model runs **outside** NestJS as a monthly Python job (`Forecast_Model/forecast.py`), reads the private T2MIS export, and writes aggregate `forecasts_<month>.json` + `forecast_meta_<month>.json`. `npm run forecast:import` validates the file, maps raw T2MIS IDs to PSGC/center IDs using `docs/forecast/forecast_places.csv`, and stores `forecast_runs` / `forecast_values` / `forecast_places`. The API serves the latest run with the same CO/RO/PO scoping as the dashboard. `candidates` = `forecast_real` (sample ÷ 0.2), never `forecast_sample`. No city-level forecast. Centers are a guide and do not sum exactly to the province. The raw data contains learner ULIs and must stay out of the repo/API DB; `Forecast_Model/Data/`, `Forecast_Model/models/` and `forecast_out/` are gitignored. Full notes: `docs/forecast/README.md`. The old Insights-tab `period`/NEXT_QUARTER forecast was removed by `DropNextQuarter`; do not bring that old shape back.
 
 **API conventions**
 - Prefix `/api/v1`. Every route needs a JWT unless it is marked `@Public()`.

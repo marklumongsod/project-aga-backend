@@ -6,3 +6,12 @@ data/raw/
 *.log
 data/osm/
 qa-travel-spotcheck.csv
+
+# macOS
+.DS_Store
+
+# Forecast model: raw learner data, the model artifact and generated output are owned by the data team.
+# The raw CSVs contain ULI identifiers; the model files are large and private.
+Forecast_Model/Data/
+Forecast_Model/models/
+forecast_out/
