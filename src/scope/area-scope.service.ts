@@ -35,7 +35,7 @@ export class AreaScopeService {
     if (!level) return this.home(user);
     if (level === AreaLevel.NATIONAL) {
       if (user.role !== Role.CO)
-        throw new ForbiddenException('Only Central Office can view the national level');
+        throw new ForbiddenException('Only Certification Office can view the national level');
       return NATIONAL;
     }
     if (!code) throw new BadRequestException('code is required for this level');

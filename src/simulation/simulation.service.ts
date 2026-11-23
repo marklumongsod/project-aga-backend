@@ -845,7 +845,7 @@ export class SimulationService {
 
   /**
    * The what-if plus what a proposal report needs (stored with the proposal, so the report shows the figures of the
-   * day it was saved): month-by-month flagged, deserts and utilization for the region, province and (Central Office)
+   * day it was saved): month-by-month flagged, deserts and utilization for the region, province and (Certification Office)
    * nationwide; the data version; and the deserts of the pin's province before and after, for the maps.
    */
   async whatIfReport(user: AuthUser, dto: WhatIfDto): Promise<WhatIfResultDto> {

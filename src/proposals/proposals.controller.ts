@@ -19,7 +19,7 @@ export class ProposalsController {
     return this.proposals.create(user, dto);
   }
 
-  /** Newest first: yours, plus those whose pin is in your region (RO) or province (PO); everything for Central Office. */
+  /** Newest first: yours, plus those whose pin is in your region (RO) or province (PO); everything for Certification Office. */
   @Get()
   list(@CurrentUser() user: AuthUser): Promise<ProposalSummaryDto[]> {
     return this.proposals.list(user);
@@ -30,7 +30,7 @@ export class ProposalsController {
     return this.proposals.get(user, id);
   }
 
-  /** Rename a proposal (its report name): the author or Central Office. */
+  /** Rename a proposal (its report name): the author or Certification Office. */
   @Patch(':id')
   rename(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RenameProposalDto): Promise<ProposalSummaryDto> {
     return this.proposals.rename(user, id, dto);

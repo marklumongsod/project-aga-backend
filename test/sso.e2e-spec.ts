@@ -90,7 +90,7 @@ describe('T2MIS single sign-on (e2e)', () => {
       .expect(200)
       .expect((r) => expect(r.body.clientId).toBe(CLIENT_ID)));
 
-  it('signs in a Central Office user (SU) and creates the account', async () => {
+  it('signs in a Certification Office user (SU) and creates the account', async () => {
     const r = await signIn({ sub: `${SUB}co`, email: 'E2E.SSO.CO@tesda.example', name: 'E2E CO', role: 'SU' }).expect(200);
     expect(r.body.tokenType).toBe('Bearer');
     expect(r.body.user).toMatchObject({ role: 'CO', regionPsgc: null, provincePsgc: null, email: 'e2e.sso.co@tesda.example' });
@@ -100,7 +100,7 @@ describe('T2MIS single sign-on (e2e)', () => {
     expect(row.password_hash).toBeNull();
   });
 
-  it('signs in a CAD user as Central Office (CAD is the CO)', async () => {
+  it('signs in a CAD user as Certification Office (CAD is the CO)', async () => {
     const r = await signIn({ sub: `${SUB}cad`, name: 'e2e.cad@tesda.example', FirstName: 'E2E', LastName: 'CAD', role: 'CAD', RegionId: '6', ProvinceId: '45' }).expect(200);
     expect(r.body.user).toMatchObject({ role: 'CO', regionPsgc: null, provincePsgc: null, name: 'E2E CAD' });
     await api().get('/api/v1/dashboard/overview?level=NATIONAL').set('Authorization', `Bearer ${r.body.accessToken}`).expect(200);

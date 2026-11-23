@@ -198,7 +198,7 @@ TESDA's microservices sign in through **SSOPortal** (OpenIddict) using the autho
 
 **Accounts** are matched by `users.t2mis_user_id` (the SSO `sub`). An existing AGA account with the same email that is not linked yet adopts the T2MIS identity; otherwise a new account is created with no password. Role, region and province are refreshed from the claims at every sign-in. `is_active = false` still blocks the account.
 
-**Roles** come from `T2MIS_SSO_ROLE_MAP` (default `CAD=CO,SU=CO,Admin=CO,RO=AUTO`: CAD is the Central Office). `AUTO` gives PO when the account's `ProvinceId` resolves to a province and RO when only `RegionId` resolves. Any SSO role that isn't listed (CACS, UTPRAS, AC, Institution…) gets 403. When a user holds several roles, the broadest wins.
+**Roles** come from `T2MIS_SSO_ROLE_MAP` (default `CAD=CO,SU=CO,Admin=CO,RO=AUTO`: CAD is the Certification Office). `AUTO` gives PO when the account's `ProvinceId` resolves to a province and RO when only `RegionId` resolves. Any SSO role that isn't listed (CACS, UTPRAS, AC, Institution…) gets 403. When a user holds several roles, the broadest wins.
 
 **Area ids**: the format isn't confirmed yet. The API accepts a 10-digit PSGC, an old 9-digit PSGC, or a short code (region `6` or `06` → `0600000000`; province `45` with region 6, or `06045` → `0604500000`). An id that doesn't match a known region or province gets 403, and a warning with the raw values is logged, so the real format shows up in the logs.
 

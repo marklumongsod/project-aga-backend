@@ -124,7 +124,7 @@ export class WhatIfReportDto {
   dataUpdatedAt: number | null;
   /** Asia/Manila month starts (epoch seconds): the current month, then months 1-3 */
   months: number[];
-  /** region, province and (Central Office) nationwide, as far as the office may see */
+  /** region, province and (Certification Office) nationwide, as far as the office may see */
   @ApiProperty({ type: () => [ReportAreaDto] })
   areas: ReportAreaDto[];
   @ApiPropertyOptional({ type: () => ReportMapDto, nullable: true })

@@ -1,5 +1,5 @@
 export enum Role {
-  /** Central Office - Planning Office: all regions */
+  /** Certification Office - Planning Office: all regions */
   CO = 'CO',
   /** Regional Office: own region */
   RO = 'RO',

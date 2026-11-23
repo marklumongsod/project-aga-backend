@@ -4,7 +4,7 @@ import { User } from './user.entity';
 
 /**
  * A saved what-if: a proposed assessment center with the result the server worked out when it was saved
- * (never one sent by the client). Visible to its author, to Central Office, and to the regional or provincial
+ * (never one sent by the client). Visible to its author, to Certification Office, and to the regional or provincial
  * office whose area the pin is in.
  */
 @Entity({ name: 'proposals' })

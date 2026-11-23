@@ -277,7 +277,7 @@ describe('Project AGA API (e2e)', () => {
       }
       expect(rep.map).toMatchObject({ provincePsgc: NEGROS_OCC });
       expect(rep.map.desertsAfter.length).toBeLessThanOrEqual(rep.map.desertsBefore.length);
-      // Central Office gets region, province and nationwide, in that order
+      // Certification Office gets region, province and nationwide, in that order
       const co = (await post('co', SIPALAY).expect(201)).body;
       expect(co.result.report.areas.map((a: { level: string }) => a.level)).toEqual(['REGION', 'PROVINCE', 'NATIONAL']);
       expect(co.authorAreaName).toBeNull();
@@ -293,7 +293,7 @@ describe('Project AGA API (e2e)', () => {
       expect(await mine('po')).toHaveLength(0);
     });
 
-    it('is visible to its author, to Central Office and to the regional office of the area, not to others', async () => {
+    it('is visible to its author, to Certification Office and to the regional office of the area, not to others', async () => {
       const saved = await post('po', SIPALAY).expect(201);
       for (const who of ['po', 'ro', 'co'] as const) expect((await mine(who)).map((p) => p.id)).toContain(saved.body.id);
       expect((await mine('po'))[0]!.mine).toBe(true);
@@ -308,7 +308,7 @@ describe('Project AGA API (e2e)', () => {
       expect(one.body.result.pin.cityName).toBe('City of Sipalay');
     });
 
-    it('can be deleted by its author or by Central Office, not by someone who can only see it', async () => {
+    it('can be deleted by its author or by Certification Office, not by someone who can only see it', async () => {
       const a = await post('po', SIPALAY).expect(201);
       await api().delete(`/api/v1/proposals/${a.body.id}`).set(as('ro')).expect(403);
       await api().delete(`/api/v1/proposals/${a.body.id}`).set(as('po')).expect(204);
@@ -328,7 +328,7 @@ describe('Project AGA API (e2e)', () => {
       expect(c.body.reportNo).toBeGreaterThan(b.body.reportNo);
     });
 
-    it('can be renamed by its author or by Central Office, not by someone who can only see it', async () => {
+    it('can be renamed by its author or by Certification Office, not by someone who can only see it', async () => {
       const a = await post('po', SIPALAY).expect(201);
       const renamed = await api().patch(`/api/v1/proposals/${a.body.id}`).set(as('po')).send({ name: `  ${TAG}  ` }).expect(200);
       expect(renamed.body.name).toBe(TAG); // trimmed

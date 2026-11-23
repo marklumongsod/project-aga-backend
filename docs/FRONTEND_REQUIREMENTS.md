@@ -11,7 +11,7 @@
 One web app with two faces:
 
 1. **TESDA office dashboard** (sign-in required) for three roles:
-   - **CO**, Central Office: the whole country
+   - **CO**, Certification Office: the whole country
    - **RO**, Regional Office: one region
    - **PO**, Provincial Office: one province
 
@@ -100,7 +100,7 @@ Demo accounts (password = `SEED_DEMO_PASSWORD` from the backend `.env`):
 | Can drill into | any region, any province | own region's provinces | (none, already at province) |
 | Nav | Dashboard · Plan a center · Proposals · Reports | Dashboard · Reports | Dashboard · Reports |
 | What-if pin | anywhere on land | inside own region | inside own province |
-| Header badge | `CO · CENTRAL OFFICE` | `RO · REGIONAL OFFICE` | `PO · PROVINCIAL OFFICE` |
+| Header badge | `CO · CERTIFICATION OFFICE` | `RO · REGIONAL OFFICE` | `PO · PROVINCIAL OFFICE` |
 
 The backend enforces all of this (`403 "This area is outside your office scope"`). The UI must also hide what a role can't use. Don't show disabled controls for other roles' features. RO and PO screens show a footnote: "Figures outside <area> are hidden for this account."
 
@@ -264,7 +264,7 @@ Entry points: the "Drag a new center onto the map" chip (with a location-pin ico
 1. The map shows the user's area (same choropleth as Overview) and a gold **New assessment center** chip with a location-pin icon. The user drags a plain gold location pin (teardrop with a white dot, tip on the spot) onto the map (MapLibre `Marker({ draggable: true })`). They can drag it again afterwards.
 2. **The side panel fits the screen** (no long page scroll). It is a column with its own scroll and two tabs, and the proposal buttons pinned at the bottom:
    - **Recommended places** tab (the default), from `GET /simulation/recommendations?level=&code=&count=3`: a one-line summary ("N assessment deserts in <area> hold M candidates. These sites close the most, best first.") and up to three compact cards. Each card has a rank badge, the city and province, "+X candidates · closes N deserts", one muted line (the deserts it covers when more than one, otherwise "On <road name>", or "Inside the city (road not found)"), an **Offer first** line of up to three qualification chips from `topQualifications` (name and `~estimatedCandidates`; a chip is amber when `centersOffering` is 0, and its tooltip says how many candidates, the share, and how many centers already offer it), and a **Place pin** button. `qualificationSource` is shown under the cards. The figures are estimates: the province's graduate mix applied to the candidates the site serves. The same sites appear on the map as numbered gold markers; clicking a marker or the button puts the pin there, flies the map to it and runs the what-if. The card of the site the pin is on is highlighted. With no deserts the tab says "<area> has no assessment deserts, so no new center is needed." A failed request hides the cards (the planner still works by dragging).
-   - **If this center opens** tab (disabled until a pin is placed; the panel switches to it by itself when the first pin is placed, and back to the first tab when the pin is removed): the site name and coordinates on one line; **Newly served** and **Deserts closed** side by side; **Flagged in <area>** with the new share large and "was x% · n left"; a small **Where the pin lands** table (Area, Flagged before → after, Deserts before → after, with Nationwide for Central Office); and **Places that gain the most** (3 rows, then "Show all (n more)").
+   - **If this center opens** tab (disabled until a pin is placed; the panel switches to it by itself when the first pin is placed, and back to the first tab when the pin is removed): the site name and coordinates on one line; **Newly served** and **Deserts closed** side by side; **Flagged in <area>** with the new share large and "was x% · n left"; a small **Where the pin lands** table (Area, Flagged before → after, Deserts before → after, with Nationwide for Certification Office); and **Places that gain the most** (3 rows, then "Show all (n more)").
    - Pinned footer (visible on both tabs once a pin is placed): the optional proposal name, **Save proposal**, **Export PDF** (and **Send to Regional Office** for PO), and a "Saved. Find it under Proposals." note.
    - The map is tall (it fills the screen height, 420 to 700 px). Below 1100 px wide the panel stacks under the map without its own scroll.
    - There is no re-run button: the what-if runs by itself every time the pin is placed, moved or dragged, debounced 400 ms (cancel in-flight requests with `AbortController`; show a skeleton in the result tab while it loads).
@@ -303,7 +303,7 @@ Entry points: the "Drag a new center onto the map" chip (with a location-pin ico
 
 ## 7b. Proposals (`/proposals`)
 
-`GET /proposals` lists saved proposals, newest first: your own, plus those whose pin is in your region (RO) or province (PO); Central Office sees all. Table columns: Proposal (name, city, travel limit), Area, Newly served, Deserts closed, Flagged (before → after), Saved by (You, or the author and office), Saved (date), Actions. Actions: **Open** (link to `/plan?level=..&code=..&pin=lat,lon`), **Export PDF** (fetches `GET /proposals/:id` and builds the same PDF as the planner), **Delete** (author or Central Office only; asks "Delete / Keep" in place, no browser dialog). Empty state: "No proposals yet" with a button to the planner. `GET /proposals/:id` and `DELETE` answer `404` for a proposal you may not see.
+`GET /proposals` lists saved proposals, newest first: your own, plus those whose pin is in your region (RO) or province (PO); Certification Office sees all. Table columns: Proposal (name, city, travel limit), Area, Newly served, Deserts closed, Flagged (before → after), Saved by (You, or the author and office), Saved (date), Actions. Actions: **Open** (link to `/plan?level=..&code=..&pin=lat,lon`), **Export PDF** (fetches `GET /proposals/:id` and builds the same PDF as the planner), **Delete** (author or Certification Office only; asks "Delete / Keep" in place, no browser dialog). Empty state: "No proposals yet" with a button to the planner. `GET /proposals/:id` and `DELETE` answer `404` for a proposal you may not see.
 
 ## 8. Simulation runs
 

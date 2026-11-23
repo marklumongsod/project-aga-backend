@@ -33,7 +33,7 @@ export class ProposalsService {
     private readonly sim: SimulationService,
   ) {}
 
-  /** Who may read a proposal: its author, Central Office, and the office whose region or province the pin is in. */
+  /** Who may read a proposal: its author, Certification Office, and the office whose region or province the pin is in. */
   private canSee(user: AuthUser, p: { authorId: string; regionPsgc: string | null; provincePsgc: string | null }): boolean {
     if (p.authorId === user.id || user.role === Role.CO) return true;
     if (user.role === Role.RO) return !!p.regionPsgc && p.regionPsgc.trim() === user.regionPsgc?.trim();
@@ -116,20 +116,20 @@ export class ProposalsService {
     return { ...this.summary(user, r), result: r.snapshot as WhatIfResultDto };
   }
 
-  /** Rename (the report's name). Same rule as delete: the author, or Central Office. */
+  /** Rename (the report's name). Same rule as delete: the author, or Certification Office. */
   async rename(user: AuthUser, id: string, dto: RenameProposalDto): Promise<ProposalSummaryDto> {
     const [r]: Row[] = await this.db.query(`${SELECT} WHERE p.id = $1`, [id]);
     if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
-    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Central Office can rename a proposal');
+    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Certification Office can rename a proposal');
     await this.db.query(`UPDATE proposals SET name = $2 WHERE id = $1`, [id, dto.name]);
     return this.summary(user, { ...r, name: dto.name });
   }
 
-  /** The author may delete their own; Central Office may delete any. */
+  /** The author may delete their own; Certification Office may delete any. */
   async remove(user: AuthUser, id: string): Promise<void> {
     const [r]: Row[] = await this.db.query(`${SELECT} WHERE p.id = $1`, [id]);
     if (!r || !this.canSee(user, r)) throw new NotFoundException('Proposal not found');
-    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Central Office can delete a proposal');
+    if (r.authorId !== user.id && user.role !== Role.CO) throw new ForbiddenException('Only the author or Certification Office can delete a proposal');
     await this.db.query(`DELETE FROM proposals WHERE id = $1`, [id]);
   }
 }

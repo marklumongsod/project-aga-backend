@@ -47,7 +47,7 @@ describe('T2MIS SSO claims', () => {
   it('picks the broadest mapped role and refuses unmapped ones', () => {
     expect(pickRoleTarget(['ro', 'Admin'], map)).toBe(Role.CO);
     expect(pickRoleTarget(['RO'], map)).toBe('AUTO');
-    expect(pickRoleTarget(['CAD'], map)).toBe(Role.CO); // CAD is the Central Office
+    expect(pickRoleTarget(['CAD'], map)).toBe(Role.CO); // CAD is the Certification Office
     expect(pickRoleTarget(['RO', 'UTPRAS'], map)).toBe(Role.RO);
     expect(pickRoleTarget(['AC', 'Institution'], map)).toBeNull();
     expect(pickRoleTarget([], map)).toBeNull();
