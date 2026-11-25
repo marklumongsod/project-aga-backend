@@ -55,6 +55,8 @@ npm run lint        # type-check
 | GET | `/dashboard/centers` | office | Centers in the area: predicted candidates; with `qualification`+`quarter`: slots, assigned, utilization |
 | GET | `/centers/:id` | office | Center card: qualifications, predicted candidates |
 | GET | `/centers/:id/utilization?quarter=` | office | Capacity utilization per qualification the center offers |
+| GET | `/forecasts/meta` | office | Latest monthly forecast run, model version, accuracy and stale flag |
+| GET | `/forecasts?level=&code=` | office | Six-month assessment-candidate forecast for the user's area (national/region/province/center), scoped by role |
 | GET | `/centers/:id/reach` | office | Cities by travel time to the center (the fallback when there is no routing) |
 | GET | `/centers/:id/isochrone` | office | True drive-time polygons (30 / 60 / 90 minutes) from OSRM road and ferry routing; 503 without routing |
 | GET | `/simulation/snap?lat=&lon=&level=&code=` | office | Move a hand-placed pin onto the nearest road (within 5 km, inside the area), or leave it where it is |
@@ -101,6 +103,8 @@ flagged share = flagged / candidates
 
 ### Capacity utilization (per center and qualification, per quarter)
 
+See [docs/utilization/README.md](docs/utilization/README.md) for the full backend notes.
+
 Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity run assigns each qualification's candidates to the **nearest accredited center with an open slot within 90 minutes**; if that center is full, overflow goes to the next reachable center. Anyone left is flagged.
 
 - Slots are stored monthly in `center_qualification_slots`: one row per center × qualification × month. A quarter is the sum of its three months.
@@ -114,6 +118,26 @@ Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity 
   npm run demo:utilization -- --quarter=2026-Q4
   ```
   If staging already has real TESDA graduates, only slots are generated; otherwise demo candidates are added too. Demo rows are marked `source = 'demo'`.
+
+### Assessment candidate forecasts (Team C model)
+
+A monthly Python/LightGBM batch job reads the private T2MIS export and writes `forecasts_<month>.json`. NestJS imports
+the aggregate output, maps raw T2MIS IDs to PSGC/center IDs, and serves it from Postgres. The API never runs Python or
+reads learner data.
+
+```bash
+npm run forecast:map        # rebuild docs/forecast/forecast_places.csv (after a geography change)
+npm run forecast:meta -- --forecast forecast_out/forecasts_2026-10.json --out forecast_out/forecast_meta_2026-10.json
+npm run forecast:import -- --file=forecast_out/forecasts_2026-10.json --meta=forecast_out/forecast_meta_2026-10.json --replace
+```
+
+- `GET /forecasts/meta` — latest run, model version, accuracy, `stale`.
+- `GET /forecasts?level=NATIONAL|REGION|PROVINCE|CENTER&code=` — six monthly points plus children.
+- CO sees all areas; RO their region; PO their province.
+- `candidates` = `forecast_real` (full-population estimate), not the 20% sample.
+- No city-level forecast. Center forecasts are a guide; centers do not sum exactly to the province forecast.
+- See [docs/forecast/README.md](docs/forecast/README.md) for the data contract, mapping rules, schema, accuracy and
+  operations.
 
 ### Assessment deserts, hotspots and density (team doc)
 
@@ -139,7 +163,7 @@ Coordinates are WGS84 longitude/latitude, **EPSG:4326**, in every PostGIS column
 | --- | --- | --- |
 | Candidates | Upcoming TESDA graduates (next 6 months) per town, from the TESDA API; province-only graduates split over the province's towns (20% evenly, 80% by graduates). Counts people about to finish, not people already waiting | T2MIS enrollee-candidates per city (people waiting for assessment) |
 | Travel time | `TRAVEL_MODEL=estimate`: straight line × 1.35 at 35 km/h, +90 min per sea crossing. `TRAVEL_MODEL=osrm`: real road + ferry times from OpenStreetMap (see *Real travel times* below) | Same, plus traffic and ferry schedules (OSRM knows neither) |
-| Next quarter | Not built: there is no forecast. The TESDA students sync keeps `upcoming_graduates` (per finish month) for it | Team C ML forecast (seasonal naive / SARIMA / gradient boosting with lags) |
+| Forecast | Monthly Team C LightGBM forecast for national/region/province/center, 1–6 months ahead; imported from `Forecast_Model` (see [docs/forecast/README.md](docs/forecast/README.md)) | Retrain every 3–6 months with new T2MIS data |
 | Per qualification | `?qualification=` runs on that qualification's upcoming graduates and the centers accredited for it | T2MIS counts per qualification |
 
 ### Real travel times (OSRM)

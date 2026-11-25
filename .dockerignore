@@ -5,3 +5,7 @@ data/raw
 .env
 *.log
 data/osm
+
+# The forecast worker and its raw learner data are not part of the API image.
+Forecast_Model
+forecast_out

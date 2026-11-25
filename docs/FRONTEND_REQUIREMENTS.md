@@ -166,6 +166,7 @@ Rules:
 - **`parentCode`** is what an area sits in (a province's region, a city's province; `null` for a region or the country). Use it to fill the Region and Province pickers and the back buttons when the link has no `?region=`.
 - **Shares are fractions** (`0.161` = 16.1%). `flaggedShare` always shows one decimal. `centers: 0` means the area has no center of its own → show "No center" (PO Top 3 "Status" column).
 - **Capacity utilization:** add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard, map and centers calls. The area/rows then include `slots`, `assigned`, `utilization` (candidates ÷ slots, can exceed 1) and `serviceRate` (assigned ÷ candidates); `utilizationBand` maps to `utilizationLegend` (green → red, text labels included). `/centers/:id/utilization?quarter=` returns every qualification the center offers with slots, candidates, assigned and utilization. The regular calls have these fields as `null`. Demo slots are 20 per program per center per month.
+- **Forecast:** `GET /forecasts/meta` returns the latest `forecastMonth`, `modelVersion`, `stale` and test accuracy. `GET /forecasts?level=NATIONAL|REGION|PROVINCE|CENTER&code=` returns `run`, the level's `accuracy`, `area` with six `{ targetMonth, horizon, candidates }` points, `children`, and `coverage`. Omit `level`/`code` for the user's home area. `candidates` is the full-population estimate (`forecast_real`), not the 20% sample. Show the forecast month, model version and accuracy caveat. Center forecasts are a guide; centers do not add up to the province forecast. There is no city-level forecast. `available: false` with an empty `forecast` means "no forecast yet" (closed/new center), not an error. If `stale` is true, show a warning. See `docs/forecast/README.md`.
 - Every `limitMinutes` request (`?limitMinutes=`, 10 to 180) returns the same shape; `run.assumptions.limitMinutes` is the limit that was used. Anything outside 10 to 300, or not a whole number, is `400`.
 - Flagged candidates are exactly the candidates in desert cities (no center in reach), so `flagged` equals `desertCandidates` at every level.
 - `top` is already Top 5 regions (national) or Top 3 provinces/cities (region/province), worst first. Don't re-rank. Read each item's `level` for the title.
@@ -465,6 +466,7 @@ Build these with a clear placeholder and don't fake the data.
 | Feature in design | Status | Frontend behavior |
 | --- | --- | --- |
 | TESDA SSO (T2MIS) | built; `501` until the server sets `T2MIS_SSO_ISSUER` | On `501` the button shows the "not connected yet" message |
+| Assessment candidate forecast | built (`/forecasts`, `/forecasts/meta`) | Show the six-month series with the accuracy caveat; no city-level forecast |
 | Send to Regional Office | no endpoint | Toast "coming soon" |
 | Reports page | no endpoint | Placeholder page |
 | Qualification filter on dashboards and what-if | no per-qualification candidate counts | Disabled select + hint |

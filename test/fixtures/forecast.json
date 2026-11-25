@@ -1,0 +1,242 @@
+[
+ {
+  "forecast_month": "2026-10",
+  "horizon": 1,
+  "target_month": "2026-11",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 1,
+  "target_month": "2026-11",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 1,
+  "target_month": "2026-11",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 1,
+  "target_month": "2026-11",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 2,
+  "target_month": "2026-12",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 2,
+  "target_month": "2026-12",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 2,
+  "target_month": "2026-12",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 2,
+  "target_month": "2026-12",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 3,
+  "target_month": "2027-01",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 3,
+  "target_month": "2027-01",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 3,
+  "target_month": "2027-01",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 3,
+  "target_month": "2027-01",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 4,
+  "target_month": "2027-02",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 4,
+  "target_month": "2027-02",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 4,
+  "target_month": "2027-02",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 4,
+  "target_month": "2027-02",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 5,
+  "target_month": "2027-03",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 5,
+  "target_month": "2027-03",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 5,
+  "target_month": "2027-03",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 5,
+  "target_month": "2027-03",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 6,
+  "target_month": "2027-04",
+  "level": "national",
+  "place_id": "PH",
+  "parent_id": "",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 6,
+  "target_month": "2027-04",
+  "level": "region",
+  "place_id": "6",
+  "parent_id": "PH",
+  "forecast_sample": 1000.0,
+  "forecast_real": 5000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 6,
+  "target_month": "2027-04",
+  "level": "province",
+  "place_id": "45",
+  "parent_id": "6",
+  "forecast_sample": 800.0,
+  "forecast_real": 4000
+ },
+ {
+  "forecast_month": "2026-10",
+  "horizon": 6,
+  "target_month": "2027-04",
+  "level": "center",
+  "place_id": "533",
+  "parent_id": "45",
+  "forecast_sample": 500.0,
+  "forecast_real": 2500
+ }
+]
