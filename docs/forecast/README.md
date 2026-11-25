@@ -223,6 +223,30 @@ The importer checks:
 
 Then it stores the run and mapped values in one transaction. It never reads raw learner data.
 
+## 5b. Seed snapshot
+
+This branch includes a committed 2026-10 snapshot for environments that do not have the raw data or the model artifact:
+
+```bash
+npm run db:migrate
+npm run db:seed            # core geography/centers, only if the database is empty
+npm run forecast:seed      # fresh forecast tables
+# or, when forecast data already exists:
+npm run forecast:seed -- --force
+```
+
+Seed file:
+
+```text
+seed/forecasts/2026-10/forecast_tables.sql.gz
+```
+
+It is loaded inside a transaction and replaces `forecast_runs`, `forecast_values` and `forecast_places`.
+
+It needs the core backend data (centers, provinces, qualifications) because `forecast_values.center_id` is a foreign key. It does **not** need the raw T2MIS CSVs or the LightGBM model artifact.
+
+It is a point-in-time snapshot: the API's `stale` flag will mark it old after a month. It does not replace the monthly worker for new months.
+
 ---
 
 ## 6. API

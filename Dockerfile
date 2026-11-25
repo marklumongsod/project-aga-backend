@@ -18,6 +18,8 @@ COPY package.json ./
 COPY database/seed-data ./database/seed-data
 # Forecast place mapping (no learner data) used by npm run forecast:import:prod.
 COPY docs/forecast/forecast_places.csv ./docs/forecast/forecast_places.csv
+# Point-in-time forecast snapshot for npm run forecast:seed:prod.
+COPY seed/forecasts ./seed/forecasts
 USER aga
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:3000/api/v1/health >/dev/null || exit 1
