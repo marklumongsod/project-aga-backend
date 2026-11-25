@@ -9,8 +9,8 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  *
  * `forecast_real` is stored at the raw model value and `share` is applied when the API sums a split place.
  */
-export class Forecast1792600000022 implements MigrationInterface {
-  name = 'Forecast1792600000022';
+export class Forecast1792600000025 implements MigrationInterface {
+  name = 'Forecast1792600000025';
 
   public async up(q: QueryRunner): Promise<void> {
     await q.query(`

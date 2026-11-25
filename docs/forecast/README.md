@@ -185,7 +185,7 @@ target_type, target_code, share, note
 
 `target_type` is `national`, `region`, `province`, `center` or `excluded`.
 
-Migration: `src/database/migrations/1792600000022-Forecast.ts`.
+Migration: `src/database/migrations/1792600000025-Forecast.ts`.
 
 ---
 
@@ -489,7 +489,7 @@ worker. Only the aggregate output is imported into the API.
 
 ```text
 src/database/entities/forecast.entity.ts
-src/database/migrations/1792600000022-Forecast.ts
+src/database/migrations/1792600000025-Forecast.ts
 src/forecast/forecast.util.ts
 src/forecast/forecast.util.spec.ts
 src/forecast/forecast-import.service.ts
