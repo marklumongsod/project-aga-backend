@@ -8,20 +8,30 @@ It serves:
 - **CO / RO / PO dashboards**: the Overview, the 17 regions for the Philippines (Top 5), the provinces of a region and the cities of a province (Top 3), listing only areas with flagged candidates, a choropleth map, center cards and the 90-minute reach of a center.
 - **Assessment deserts and flagged candidates**: which cities have no center in reach, run daily and on demand, plus a **drag-and-drop what-if** for a proposed center.
 - **The public learner finder** (no sign-in): search a place or use your current location, filter by qualification and area, and get the nearest assessment centers by travel time.
+- **Model features**: a six-month candidate forecast for existing areas, and a first-year estimate for a proposed assessment center.
 
 > **New here?** Follow [GETTING_STARTED.md](GETTING_STARTED.md): the whole project (backend and frontend) step by step.
+>
+> **Full backend documentation:** [docs/BACKEND_GUIDE.md](docs/BACKEND_GUIDE.md) — architecture, every endpoint, database, deployment and operations.
+>
+> **Deploying or handing this over?** Read [docs/handover/BACKEND_HANDOVER.md](docs/handover/BACKEND_HANDOVER.md).
 
 ## Quick start (local)
 
 ```bash
-cp .env.example .env              # set JWT_SECRET and SEED_DEMO_PASSWORD
+cp .env.example .env              # set JWT_SECRET, SEED_DEMO_PASSWORD and TESDA_API_KEY
 docker compose up -d db           # PostgreSQL 16 + PostGIS
 npm ci
 npm run db:setup                  # migrations + seed (geography, demo accounts) + TESDA API sync (centers, candidates) + data-quality recovery
+npm run forecast:seed             # 2026-10 forecast snapshot (no raw data or model artifact)
 npm run simulate                  # first simulation run (then daily at SIM_CRON)
 npm run demo:utilization -- --quarter=2026-Q4   # optional: demo slots + candidates for the capacity view
 npm run start:dev                 # http://localhost:3000/api/v1, docs at http://localhost:3000/docs
 ```
+
+`/forecasts` works after `forecast:seed`. `/new-centers` needs the optional internal Python service and the private
+T2MIS export; see [docs/new-centers/README.md](docs/new-centers/README.md) and
+[GETTING_STARTED.md](GETTING_STARTED.md#5-optional-new-center-model-service).
 
 Whole stack in containers, and what to check before putting it on a server: see [HOSTING.md](HOSTING.md).
 
@@ -55,12 +65,16 @@ npm run lint        # type-check
 | GET | `/dashboard/centers` | office | Centers in the area: predicted candidates; with `qualification`+`quarter`: slots, assigned, utilization |
 | GET | `/centers/:id` | office | Center card: qualifications, predicted candidates |
 | GET | `/centers/:id/utilization?quarter=` | office | Capacity utilization per qualification the center offers |
+| GET | `/forecasts/meta` | office | Latest monthly forecast run, model version, accuracy and stale flag |
+| GET | `/forecasts?level=&code=` | office | Six-month assessment-candidate forecast for the user's area (national/region/province/center), scoped by role |
 | GET | `/centers/:id/reach` | office | Cities by travel time to the center (the fallback when there is no routing) |
 | GET | `/centers/:id/isochrone` | office | True drive-time polygons (30 / 60 / 90 minutes) from OSRM road and ferry routing; 503 without routing |
 | GET | `/simulation/snap?lat=&lon=&level=&code=` | office | Move a hand-placed pin onto the nearest road (within 5 km, inside the area), or leave it where it is |
 | POST/GET/DELETE | `/proposals`, `/proposals/:id` | office | Save a what-if as a proposal (the server works out the result), list the ones you may see, open or delete one |
 | GET | `/simulation/recommendations?level=&code=&limitMinutes=&count=` | office | Where to open a new center: up to 5 sites (default 3) in the area, best first. Each is a desert city with the pin moved onto the nearest road (OSRM), the candidates it serves, the deserts it closes, and the top 3 qualifications to offer (estimated from graduates per province and qualification) |
 | POST | `/simulation/what-if` | office | Drag and drop a proposed center `{lat, lon}`: before/after for the user's area, nationally, and for the region and province where the pin lands (as far as the role may see), including assessment deserts closed |
+| GET | `/new-centers/meta` | office | New Center Model cutoff, latest allowed accreditation month, model version and accuracy |
+| POST | `/new-centers/predict` | office | Estimate a planned center's first 12 months and chance of getting any candidates |
 | GET | `/public/places?q=` | public | Place search |
 | GET | `/public/qualifications?q=` | public | Qualification filter |
 | GET | `/public/centers/nearest?lat=&lon=` or `?cityKey=` `&qualification=&regionPsgc=&provincePsgc=` | public | Nearest centers, travel time, `desert` flag |
@@ -101,6 +115,8 @@ flagged share = flagged / candidates
 
 ### Capacity utilization (per center and qualification, per quarter)
 
+See [docs/utilization/README.md](docs/utilization/README.md) for the full backend notes.
+
 Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity run assigns each qualification's candidates to the **nearest accredited center with an open slot within 90 minutes**; if that center is full, overflow goes to the next reachable center. Anyone left is flagged.
 
 - Slots are stored monthly in `center_qualification_slots`: one row per center × qualification × month. A quarter is the sum of its three months.
@@ -114,6 +130,41 @@ Add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard calls. The capacity 
   npm run demo:utilization -- --quarter=2026-Q4
   ```
   If staging already has real TESDA graduates, only slots are generated; otherwise demo candidates are added too. Demo rows are marked `source = 'demo'`.
+
+### Assessment candidate forecasts (Team C model)
+
+A monthly Python/LightGBM batch job reads the private T2MIS export and writes `forecasts_<month>.json`. NestJS imports
+the aggregate output, maps raw T2MIS IDs to PSGC/center IDs, and serves it from Postgres. The API never runs Python or
+reads learner data.
+
+```bash
+npm run forecast:map        # rebuild docs/forecast/forecast_places.csv (after a geography change)
+npm run forecast:meta -- --forecast forecast_out/forecasts_2026-10.json --out forecast_out/forecast_meta_2026-10.json
+npm run forecast:import -- --file=forecast_out/forecasts_2026-10.json --meta=forecast_out/forecast_meta_2026-10.json --replace
+npm run forecast:seed       # load the committed 2026-10 snapshot (no raw data or model artifact)
+```
+
+- `GET /forecasts/meta` — latest run, model version, accuracy, `stale`.
+- `GET /forecasts?level=NATIONAL|REGION|PROVINCE|CENTER&code=` — six monthly points plus children.
+- CO sees all areas; RO their region; PO their province.
+- `candidates` = `forecast_real` (full-population estimate), not the 20% sample.
+- No city-level forecast. Center forecasts are a guide; centers do not sum exactly to the province forecast.
+- See [docs/forecast/README.md](docs/forecast/README.md) for the data contract, mapping rules, schema, accuracy and
+  operations.
+
+### New assessment center estimate (New Center Model)
+
+For a planned center, or a center accredited in the last 12 months with no candidates yet, the New Center Model
+estimates the first 12 months and the chance of any candidates. It is separate from the monthly forecast.
+
+- `GET /new-centers/meta` — raw-data cutoff, latest allowed accreditation month, model version, accuracy.
+- `POST /new-centers/predict` — body: `lat`, `lon`, `provincePsgc`, `qualificationKeys`, `accreditationMonth`,
+  optional `name`, `centerType`, `centerClass`.
+- The pin must be inside the selected province and the user's area; qualifications must be in the mapping.
+- The response: `chanceAnyCandidates`, `firstYearExpected`, 12 `monthly` rows, and a stored `id`.
+- The internal Python service holds the raw data and the model artifact; the API never runs Python.
+- Accuracy: first-year error about 120%, bias +28%. Use it to compare sites, not as an exact number.
+- See [docs/new-centers/README.md](docs/new-centers/README.md).
 
 ### Assessment deserts, hotspots and density (team doc)
 
@@ -139,7 +190,7 @@ Coordinates are WGS84 longitude/latitude, **EPSG:4326**, in every PostGIS column
 | --- | --- | --- |
 | Candidates | Upcoming TESDA graduates (next 6 months) per town, from the TESDA API; province-only graduates split over the province's towns (20% evenly, 80% by graduates). Counts people about to finish, not people already waiting | T2MIS enrollee-candidates per city (people waiting for assessment) |
 | Travel time | `TRAVEL_MODEL=estimate`: straight line × 1.35 at 35 km/h, +90 min per sea crossing. `TRAVEL_MODEL=osrm`: real road + ferry times from OpenStreetMap (see *Real travel times* below) | Same, plus traffic and ferry schedules (OSRM knows neither) |
-| Next quarter | Not built: there is no forecast. The TESDA students sync keeps `upcoming_graduates` (per finish month) for it | Team C ML forecast (seasonal naive / SARIMA / gradient boosting with lags) |
+| Forecast | Monthly Team C LightGBM forecast for national/region/province/center, 1–6 months ahead; imported from `Forecast_Model` (see [docs/forecast/README.md](docs/forecast/README.md)) | Retrain every 3–6 months with new T2MIS data |
 | Per qualification | `?qualification=` runs on that qualification's upcoming graduates and the centers accredited for it | T2MIS counts per qualification |
 
 ### Real travel times (OSRM)

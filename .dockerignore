@@ -5,3 +5,8 @@ data/raw
 .env
 *.log
 data/osm
+
+# The model services and raw learner data are separate images, not part of the API image.
+Forecast_Model
+forecast_out
+New_Center_Model

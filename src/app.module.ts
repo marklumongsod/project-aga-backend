@@ -12,6 +12,8 @@ import { DatabaseExceptionFilter } from './common/database-exception.filter';
 import { AppThrottlerGuard, JwtAuthGuard, RolesGuard } from './common/guards';
 import { validateEnv } from './config/env.validation';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ForecastModule } from './forecast/forecast.module';
+import { NewCentersModule } from './new-centers/new-centers.module';
 import { typeormOptions } from './database/data-source';
 import { HealthController } from './health/health.controller';
 import { PublicModule } from './public/public.module';
@@ -69,6 +71,8 @@ import { SimulationModule } from './simulation/simulation.module';
     SimulationModule,
     DashboardModule,
     CentersModule,
+    ForecastModule,
+    NewCentersModule,
     ProposalsModule,
     PublicModule,
   ],

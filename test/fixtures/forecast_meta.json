@@ -1,0 +1,42 @@
+{
+ "forecast_month": "2026-10",
+ "target_months": [
+  "2026-11",
+  "2026-12",
+  "2027-01",
+  "2027-02",
+  "2027-03",
+  "2027-04"
+ ],
+ "generated_at": "2026-11-23T00:00:00+00:00",
+ "model_version": "test-forecast-2026-10",
+ "sample_rate": 0.2,
+ "trained_on": "test fixture",
+ "test_accuracy": {
+  "national": {
+   "WAPE_1_6": 22.9,
+   "WAPE_1_month": 15.2,
+   "WAPE_6_months": 24.5,
+   "bias": 5.9
+  },
+  "region": {
+   "WAPE_1_6": 31.1,
+   "WAPE_1_month": 23.4,
+   "WAPE_6_months": 34.1,
+   "bias": 5.9
+  },
+  "province": {
+   "WAPE_1_6": 45.0,
+   "WAPE_1_month": 34.8,
+   "WAPE_6_months": 53.2,
+   "bias": 11.6
+  },
+  "center": {
+   "WAPE_1_6": 104.9,
+   "WAPE_1_month": 84.7,
+   "WAPE_6_months": 121.1,
+   "bias": 13.0
+  }
+ },
+ "row_count": 24
+}

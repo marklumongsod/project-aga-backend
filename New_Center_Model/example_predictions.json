@@ -1,0 +1,83 @@
+[
+ {
+  "name": "Example planned center",
+  "accreditation_month": "2026-09",
+  "chance_any_candidates": 0.293,
+  "first_year_expected_sample": 18.7,
+  "first_year_expected_real": 94,
+  "monthly": [
+   {
+    "month_since_accreditation": 1,
+    "target_month": "2026-09",
+    "expected_sample": 0.24,
+    "expected_real": 1.2
+   },
+   {
+    "month_since_accreditation": 2,
+    "target_month": "2026-10",
+    "expected_sample": 1.32,
+    "expected_real": 6.6
+   },
+   {
+    "month_since_accreditation": 3,
+    "target_month": "2026-11",
+    "expected_sample": 1.5,
+    "expected_real": 7.5
+   },
+   {
+    "month_since_accreditation": 4,
+    "target_month": "2026-12",
+    "expected_sample": 1.49,
+    "expected_real": 7.4
+   },
+   {
+    "month_since_accreditation": 5,
+    "target_month": "2027-01",
+    "expected_sample": 1.68,
+    "expected_real": 8.4
+   },
+   {
+    "month_since_accreditation": 6,
+    "target_month": "2027-02",
+    "expected_sample": 1.79,
+    "expected_real": 9.0
+   },
+   {
+    "month_since_accreditation": 7,
+    "target_month": "2027-03",
+    "expected_sample": 1.84,
+    "expected_real": 9.2
+   },
+   {
+    "month_since_accreditation": 8,
+    "target_month": "2027-04",
+    "expected_sample": 1.88,
+    "expected_real": 9.4
+   },
+   {
+    "month_since_accreditation": 9,
+    "target_month": "2027-05",
+    "expected_sample": 1.7,
+    "expected_real": 8.5
+   },
+   {
+    "month_since_accreditation": 10,
+    "target_month": "2027-06",
+    "expected_sample": 1.7,
+    "expected_real": 8.5
+   },
+   {
+    "month_since_accreditation": 11,
+    "target_month": "2027-07",
+    "expected_sample": 1.76,
+    "expected_real": 8.8
+   },
+   {
+    "month_since_accreditation": 12,
+    "target_month": "2027-08",
+    "expected_sample": 1.82,
+    "expected_real": 9.1
+   }
+  ]
+ }
+]

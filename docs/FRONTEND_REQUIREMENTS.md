@@ -166,6 +166,7 @@ Rules:
 - **`parentCode`** is what an area sits in (a province's region, a city's province; `null` for a region or the country). Use it to fill the Region and Province pickers and the back buttons when the link has no `?region=`.
 - **Shares are fractions** (`0.161` = 16.1%). `flaggedShare` always shows one decimal. `centers: 0` means the area has no center of its own → show "No center" (PO Top 3 "Status" column).
 - **Capacity utilization:** add `?qualification=<key>&quarter=YYYY-Qn` to the dashboard, map and centers calls. The area/rows then include `slots`, `assigned`, `utilization` (candidates ÷ slots, can exceed 1) and `serviceRate` (assigned ÷ candidates); `utilizationBand` maps to `utilizationLegend` (green → red, text labels included). `/centers/:id/utilization?quarter=` returns every qualification the center offers with slots, candidates, assigned and utilization. The regular calls have these fields as `null`. Demo slots are 20 per program per center per month.
+- **Forecast:** `GET /forecasts/meta` returns the latest `forecastMonth`, `modelVersion`, `stale` and test accuracy. `GET /forecasts?level=NATIONAL|REGION|PROVINCE|CENTER&code=` returns `run`, the level's `accuracy`, `area` with six `{ targetMonth, horizon, candidates }` points, `children`, and `coverage`. Omit `level`/`code` for the user's home area. `candidates` is the full-population estimate (`forecast_real`), not the 20% sample. Show the forecast month, model version and accuracy caveat. Center forecasts are a guide; centers do not add up to the province forecast. There is no city-level forecast. `available: false` with an empty `forecast` means "no forecast yet" (closed/new center), not an error. If `stale` is true, show a warning. See `docs/forecast/README.md`.
 - Every `limitMinutes` request (`?limitMinutes=`, 10 to 180) returns the same shape; `run.assumptions.limitMinutes` is the limit that was used. Anything outside 10 to 300, or not a whole number, is `400`.
 - Flagged candidates are exactly the candidates in desert cities (no center in reach), so `flagged` equals `desertCandidates` at every level.
 - `top` is already Top 5 regions (national) or Top 3 provinces/cities (region/province), worst first. Don't re-rank. Read each item's `level` for the title.
@@ -300,6 +301,21 @@ Entry points: the "Drag a new center onto the map" chip (with a location-pin ico
    - **Send to Regional Office** (PO only): still no backend; shows a "coming soon" toast.
    - **Automatic road snap**: every pin dropped or dragged by hand is sent to `GET /simulation/snap?lat=&lon=&level=&code=`. If a drivable road is within 5 km and stays inside the area and the office's scope, the pin moves onto it and the note under the map says "Moved 30 m onto <road>."; otherwise it stays and the note says no road was found. Recommended places are already on a road and are not snapped again.
    - Copy under the title: "Nothing is saved until you save the proposal."
+
+### 7a. New center first-year estimate (optional)
+
+The what-if answers “how many candidates get a center in reach?”. The New Center Model answers “how busy will this
+planned center’s first year be?”. They are separate calls.
+
+- `GET /new-centers/meta` → `lastMonth`, `latestAccreditationMonth`, `modelVersion`, `testAccuracy`.
+- `POST /new-centers/predict` with `{ lat, lon, provincePsgc, qualificationKeys, accreditationMonth, name? }` →
+  `{ id, chanceAnyCandidates, firstYearExpected, monthly: [{ month, targetMonth, expected }], accuracy }`.
+- The pin must be inside the selected province and the office’s area. Qualification keys come from
+  `GET /dashboard/qualifications`; at least one is required.
+- Use `latestAccreditationMonth` as the maximum in the month picker. Later months return `400`.
+- `cityKey` is reserved; the current model uses province + pin. `school_ids`, center type/class are optional.
+- First-year error is about 120% with +28% bias. Show it as a guide for comparing sites, not an exact number.
+- The result is stored (`id`) for audit/comparison; the response has `modelVersion`.
 
 ## 7b. Proposals (`/proposals`)
 
@@ -465,6 +481,8 @@ Build these with a clear placeholder and don't fake the data.
 | Feature in design | Status | Frontend behavior |
 | --- | --- | --- |
 | TESDA SSO (T2MIS) | built; `501` until the server sets `T2MIS_SSO_ISSUER` | On `501` the button shows the "not connected yet" message |
+| Assessment candidate forecast | built (`/forecasts`, `/forecasts/meta`) | Show the six-month series with the accuracy caveat; no city-level forecast |
+| New center first-year estimate | built (`/new-centers/meta`, `/new-centers/predict`) | Show as a guide; first-year error ~120%, no city mapping yet |
 | Send to Regional Office | no endpoint | Toast "coming soon" |
 | Reports page | no endpoint | Placeholder page |
 | Qualification filter on dashboards and what-if | no per-qualification candidate counts | Disabled select + hint |
@@ -503,4 +521,5 @@ Built on top of §1-§14 and covered by the browser tests. Expected values in th
 11. **No selected-area chip.** Picking an area highlights its row in the table and on the map; nothing extra is shown in the map header.
 12. **Number formats** follow §12: flagged shares always have one decimal.
 13. **Capacity utilization added**: use the `qualification` + `quarter` filters and `utilizationLegend`. Utilization is candidates ÷ slots (can exceed 100%); `serviceRate` is assigned ÷ candidates. Slots are monthly (demo: 20 per program per center per month). The regular reach view remains unchanged.
+14. **New center first-year estimate added**: `GET /new-centers/meta` + `POST /new-centers/predict`. Use it for a planned center or a center with no candidates yet; it returns the chance of any candidates, the first-year total, and 12 monthly rows. It is separate from the what-if and the monthly forecast. Show the accuracy caveat (~120% first-year error, +28% bias) and use it to compare sites, not as an exact number. No city mapping yet; the pin + province are used.
 

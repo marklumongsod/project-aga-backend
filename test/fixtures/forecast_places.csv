@@ -1,0 +1,5 @@
+level,source_place_id,parent_source_id,name,target_type,target_code,share,note
+national,PH,,Philippines,national,PH,1,
+region,6,PH,Region VI - Western Visayas,region,0600000000,1,
+province,45,6,Negros Occidental,province,0604500000,1,
+center,533,45,Regional Training Center - Talisay,center,533,1,

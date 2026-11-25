@@ -9,6 +9,8 @@ import {
 import { User } from './user.entity';
 import { Proposal } from './proposal.entity';
 import { AreaUtilization, CenterUtilization, SimulationRun } from './simulation.entity';
+import { ForecastPlace, ForecastRun, ForecastValue } from './forecast.entity';
+import { NewCenterPrediction } from './new-center-prediction.entity';
 
 export * from './enums';
 export * from './geography.entity';
@@ -16,6 +18,8 @@ export * from './t2mis.entity';
 export * from './user.entity';
 export * from './proposal.entity';
 export * from './simulation.entity';
+export * from './forecast.entity';
+export * from './new-center-prediction.entity';
 
 export const ENTITIES = [
   Region,
@@ -31,4 +35,8 @@ export const ENTITIES = [
   SimulationRun,
   AreaUtilization,
   CenterUtilization,
+  ForecastRun,
+  ForecastPlace,
+  ForecastValue,
+  NewCenterPrediction,
 ];

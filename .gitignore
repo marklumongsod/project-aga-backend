@@ -6,3 +6,16 @@ data/raw/
 *.log
 data/osm/
 qa-travel-spotcheck.csv
+
+# macOS / editor
+.DS_Store
+.vscode/
+
+# Monthly Team C model: private artifact and generated output (on the lightgbm branch full integration).
+Forecast_Model/
+forecast_out/
+
+# New Center Model: raw data (learner IDs) and Python cache. The model artifact itself is committed.
+New_Center_Model/Data/
+New_Center_Model/__pycache__/
+New_Center_Model/*.pyc
