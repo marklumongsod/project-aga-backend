@@ -5,7 +5,7 @@ What it takes to run Project AGA on a server instead of a laptop, what was teste
 ## The short version
 
 - **It can be hosted.** Both images build and run: the API (426 MB) and the website (79 MB, nginx). Tested together through nginx: health checks, the public finder, sign-in, the dashboards, the SPA routes and the cache and security headers.
-- **A single small server is enough** for the app itself (the database, API and website together use well under 1 GB of RAM). The optional OpenStreetMap routing server is what needs memory (about 1.5 GB).
+- **A single small server is enough** for the app itself (the database, API and website together use well under 1 GB of RAM). The optional New Center Model service needs about 1.2 GB more, and the optional OpenStreetMap routing server about 1.5 GB.
 - **Do not go live with the demo setup.** There is no way yet to create real accounts (T2MIS sign-in is not connected), and the seed creates three demo accounts. See *Before going live*.
 
 ## What runs
@@ -15,11 +15,13 @@ What it takes to run Project AGA on a server instead of a laptop, what was teste
 | `db` | PostgreSQL 16 + PostGIS 3.4 | yes | about 0.3 GB, database about 0.14 GB |
 | `api` | NestJS API (`aga-api` image) | yes | about 60 MB idle (more while a simulation runs) |
 | `web` | nginx serving the built website and forwarding `/api` | yes | about 8 MB |
+| `new-center-model` | Internal FastAPI service behind `/new-centers` | optional | about 1.2 GB, plus a 285 MB read-only data folder |
 | `osrm` | OSRM, car profile at Philippine speed limits | optional | 1.5 GB |
 
-Routing is optional. Without it `TRAVEL_MODEL=estimate` still works, and with a precomputed matrix (`npm run travel:build`, stored in the database) the simulation needs no routing server at all. The routing server is only used live for the finder's exact times, directions, a center's drive-time area and the what-if pin; if they are down those fall back to the stored matrix or the estimate and the API keeps answering.
+The monthly forecast needs no extra service: `forecast:seed` loads a committed snapshot into Postgres, and the API
+serves it like any other table. Routing is optional. Without it `TRAVEL_MODEL=estimate` still works, and with a precomputed matrix (`npm run travel:build`, stored in the database) the simulation needs no routing server at all. The routing server is only used live for the finder's exact times, directions, a center's drive-time area and the what-if pin; if they are down those fall back to the stored matrix or the estimate and the API keeps answering.
 
-Disk: about 1.8 GB for the car routing graph (only if you host routing; the 0.6 GB OpenStreetMap extract is only needed where the graph is built), plus the database.
+Disk: about 1.8 GB for the car routing graph (only if you host routing; the 0.6 GB OpenStreetMap extract is only needed where the graph is built), about 285 MB for the New Center raw data, plus the database.
 
 ## Deploy on one server with Docker Compose
 
@@ -35,7 +37,18 @@ docker compose --profile web up -d --build api web        # website on port 8080
 docker compose exec api npm run db:seed:prod               # first time only: loads the data (see the demo-accounts note)
 docker compose exec api npm run data:quality:prod -- --apply   # recovers the 38 centers a statistical check can save (see README, Data quality)
 docker compose exec api npm run simulate:prod              # first results; the dashboards are empty until this has run
+docker compose exec api npm run forecast:seed:prod         # serves /forecasts without the raw data or model artifact
 ```
+
+Optional planned-center estimate (needs the private T2MIS export):
+
+```bash
+NEW_CENTER_DATA_PATH=/path/to/private/t2mis/2026-10/Data \
+  docker compose --profile new-center up -d --build new-center-model
+```
+
+The Compose API already points at `http://new-center-model:8010`. The service needs about 1.2 GB of RAM and a
+read-only data mount; keep the port on the private network.
 
 The API container applies database migrations every time it starts. Run the data-quality step after every `db:seed:prod` (a seed reloads the centers as the source has them), or the results will differ from other installs. Put TLS in front of port 8080 (your host's load balancer, Caddy, or nginx with a certificate); the app itself speaks plain http.
 
@@ -50,7 +63,7 @@ Optional routing: build the graph once (`sh scripts/osrm-prepare.sh`), then `doc
    Signed-in office users are limited per account, not per IP (`THROTTLE_OFFICE_LIMIT`, 600 a minute): an office shares one public IP and one dashboard page makes 8-10 calls, so a per-IP limit of 60 would have locked colleagues out of each other's work (`test/throttle.e2e-spec.ts`). The public finder and sign-in stay per IP (`THROTTLE_LIMIT`, `10` for sign-in). Set `TRUST_PROXY` to the number of proxies in front of the API (1 for nginx or one load balancer), and make sure the API is *only* reachable through them (the compose file binds its port to localhost for this reason); otherwise a client could fake the `X-Forwarded-For` header to dodge the limits.
 5. **CORS.** The website calls `/api` on its own address, so CORS is not involved and `CORS_ORIGINS` can stay as is.
 6. **Swagger** (`/docs`) is off when `NODE_ENV=production`. The API sends Helmet's security headers and nginx adds its own.
-7. **Learner data.** No learner personal data is stored (RA 10173); `data/raw/` is never copied into an image. Don't add it to a server.
+7. **Learner data.** The API stores no learner personal data (RA 10173), and `data/raw/` is never copied into an image. The optional New Center Model service is the exception: it reads the private T2MIS export (ULI learner IDs) from a read-only mount at `/data`. Keep that port on a private network, never publish `8010`, and never copy the export into an image or git.
 
 ## Running it
 
@@ -58,8 +71,10 @@ Optional routing: build the graph once (`sh scripts/osrm-prepare.sh`), then `doc
 - **Logs:** the API writes JSON logs to stdout (`docker compose logs -f api`). Tokens are not logged.
 - **The monthly refresh and the daily simulation run inside the API process** (refresh 1:45 AM on the 1st, `TESDA_SYNC_CRON`; simulation 2:00 AM daily, `SIM_CRON`; Asia/Manila). The monthly refresh is one job: TESDA sync, data-quality recovery (`data:quality --apply`; undo with `data:quality:prod -- --revert`), travel times for only the centers that are new, moved or not yet routed (needs the OSRM container; if it is down they use the estimate and are retried next month), then a simulation. No manual step is needed after it. Between syncs, new centers or graduates in TESDA's data show up only after the next sync or a manual `tesda:sync:prod`. **Run one API replica.** Two replicas would both run it, and the what-if keeps its baseline in each process's memory for 10 minutes, so a re-run on one wouldn't refresh the other.
 - **History:** the latest run of each day is kept for 90 days and the last run of each quarter forever. Results live in `area_utilization` (about 1,700 rows per run) and `center_utilization` (about 5,000 rows per run).
-- **Backups:** `docker compose exec -T db pg_dump -U aga -Fc aga > aga-$(date +%F).dump`. Everything that matters is in this one database (the recovery log, the travel matrix and the run history included). Restore with `pg_restore`.
-- **Updating:** pull the code, `docker compose --profile web up -d --build api web`. Migrations run on start. After a new OpenStreetMap extract or a `car-ph.lua` change, run `travel:build:prod` and `simulate:prod` (new centers from the monthly sync are routed automatically).
+- **Forecast:** the API serves whatever is in `forecast_runs` / `forecast_values`. After a new monthly artifact, run `forecast:import:prod`; without the artifact, `forecast:seed:prod` loads the committed snapshot. The API never runs the LightGBM job.
+- **New Center Model:** the internal service loads the raw export at startup (about 25 seconds). After a new export, replace the mounted folder, set `NEW_CENTER_LAST_MONTH` to its last complete month, and restart the container (or `POST /reload`).
+- **Backups:** `docker compose exec -T db pg_dump -U aga -Fc aga > aga-$(date +%F).dump`. Everything the API serves is in this one database (the recovery log, travel matrix, run history, forecasts and stored predictions included). Restore with `pg_restore`, and back up the private New Center data folder separately.
+- **Updating:** pull the code, `docker compose --profile web up -d --build api web`. Migrations run on start. If `New_Center_Model/` changed, rebuild that image too: `docker compose --profile new-center up -d --build new-center-model`. After a new OpenStreetMap extract or a `car-ph.lua` change, run `travel:build:prod` and `simulate:prod` (new centers from the monthly sync are routed automatically).
 - **The routing data** (OpenStreetMap) is refreshed by hand: download a new extract, `sh scripts/osrm-prepare.sh`, restart the routing server, rebuild the matrix.
 
 ## Known limits

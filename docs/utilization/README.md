@@ -5,6 +5,8 @@ This document describes the capacity-based utilization view added to the `stagin
 Branch: `staging`  
 Commit: `d523e49 [FEAT] Add capacity utilization view (staging)`
 
+> Also included in `integration/models`, together with the monthly forecast and the New Center Model.
+
 The regular reach-based dashboard is unchanged. Utilization appears only when both `qualification` and `quarter` are provided.
 
 ---

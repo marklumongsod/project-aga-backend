@@ -56,9 +56,12 @@ npm run db:setup
 
 # 5. run the first simulation (the dashboards show nothing until this has run once)
 npm run simulate
+
+# 6. load the monthly forecast (the /forecasts endpoint; no raw data or model artifact needed)
+npm run forecast:seed
 ```
 
-You should see `seeded { regions: '17', provinces: '88', cities: '1628', centers: '5129', ... }` and `Applied: 38 centers recovered` after step 4, and two lines starting with `CURRENT` and `NEXT_QUARTER` after step 5.
+You should see `seeded { regions: '17', provinces: '88', cities: '1628', centers: '5129', ... }` and `Applied: 38 centers recovered` after step 4, two lines starting with `CURRENT` and `NEXT_QUARTER` after step 5, and the forecast rows loaded after step 6.
 
 ### 1.2 Frontend
 
@@ -160,7 +163,59 @@ If the routing server is off, the app keeps working with the estimate.
 
 ---
 
-## 5. Optional: let other people open it (same Wi-Fi)
+## 5. Optional: New Center Model service
+
+The planned-center estimate (`/new-centers`) runs as a separate internal Python service. The monthly forecast does
+**not** need this: `npm run forecast:seed` already loaded it.
+
+You need:
+
+- Docker
+- the model code and artifact in `New_Center_Model/` (already in the repo)
+- the private TESDA export (`Data`: 10 CSVs + `Qualification.xlsx`, about 285 MB)
+
+Build the image and start it with the export mounted **read-only** at `/data`:
+
+```bash
+cd ~/Downloads/project-aga-backend
+docker build -t aga-new-center-model New_Center_Model
+
+docker run -d --name aga-new-center-model \
+  -p 127.0.0.1:8010:8010 \
+  -v /path/to/private/t2mis/2026-10/Data:/data:ro \
+  -e NEW_CENTER_LAST_MONTH=2026-10 \
+  aga-new-center-model
+```
+
+Or with Compose:
+
+```bash
+NEW_CENTER_DATA_PATH=/path/to/private/t2mis/2026-10/Data \
+  docker compose --profile new-center up -d --build new-center-model
+```
+
+Then set in `.env`:
+
+```
+NEW_CENTER_MODEL_URL=http://localhost:8010
+```
+
+Check it:
+
+```bash
+curl -s http://localhost:8010/health
+```
+
+The service loads the export once (about 25 seconds, ~1.2 GB RAM) and then answers in milliseconds. Keep port 8010
+private: the export contains learner IDs. The folder is never copied into the image or the repo. If the service is
+down, the rest of the API keeps working and `/new-centers` answers `503`.
+
+After a new monthly export, replace the folder, set `NEW_CENTER_LAST_MONTH` to its last complete month, and restart
+the container.
+
+---
+
+## 6. Optional: let other people open it (same Wi-Fi)
 
 1. Find your address: `ipconfig getifaddr en0` (for example `10.100.14.75`).
 2. In a fourth tab, run in the frontend folder:
@@ -177,7 +232,7 @@ Notes: it only works while your computer is on and on the same network. Anyone o
 
 ---
 
-## 6. Run the tests
+## 7. Run the tests
 
 ```bash
 # backend (the database must be running and seeded)
@@ -193,7 +248,7 @@ npx playwright test               # browser tests
 
 ---
 
-## 7. Where things are
+## 8. Where things are
 
 | Need | Where |
 | --- | --- |
@@ -205,11 +260,11 @@ npx playwright test               # browser tests
 | Frontend notes | `project-aga-frontend/README.md` |
 | Putting it on a server | `project-aga-backend/HOSTING.md` |
 
-Ports in use: 3000 backend, 5173 frontend, 5174 frontend for sharing, 5432 database, 5001 routing server.
+Ports in use: 3000 backend, 8010 New Center Model service (optional), 5173 frontend, 5174 frontend for sharing, 5432 database, 5001 routing server.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | What you see | Why | Fix |
 | --- | --- | --- |
@@ -223,5 +278,8 @@ Ports in use: 3000 backend, 5173 frontend, 5174 frontend for sharing, 5432 datab
 | `Invalid environment configuration` when the backend starts | A value in `.env` is missing or wrong | Compare `.env` with `.env.example`; `JWT_SECRET` must be at least 16 characters |
 | `TRAVEL_MODEL=osrm but travel_times is empty` in the backend log | The travel-time table isn't built | Run `npm run travel:build` (section 4) |
 | Map shows colors but no streets | The OpenStreetMap basemap couldn't load (offline) | Nothing to fix; it works without it. Reload when online |
-| "Use my location" does nothing on a shared link | The page isn't on HTTPS | Use the `https://...:5174` address (section 5) |
+| "Use my location" does nothing on a shared link | The page isn't on HTTPS | Use the `https://...:5174` address (section 6) |
+| `/forecasts` returns 404 or empty | `npm run forecast:seed` hasn't run | Run `npm run forecast:seed` (no raw data needed) |
+| `/new-centers` returns 503 | The internal model service isn't running, or `NEW_CENTER_MODEL_URL` is wrong | Start `aga-new-center-model` (section 5) and check http://localhost:8010/health |
+| New Center service exits at startup | The raw data folder is missing, or `NEW_CENTER_LAST_MONTH` doesn't match the export | Check the `-v ...:/data:ro` mount and set the export's last complete month (for example `2026-10`) |
 | Apple Silicon: database image error | The PostGIS image has no native arm64 build | Already handled by `platform: linux/amd64` in `docker-compose.yml` |

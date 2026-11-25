@@ -8,8 +8,11 @@ It serves:
 - **CO / RO / PO dashboards**: the Overview, the 17 regions for the Philippines (Top 5), the provinces of a region and the cities of a province (Top 3), listing only areas with flagged candidates, a choropleth map, center cards and the 90-minute reach of a center.
 - **Assessment deserts and flagged candidates**: which cities have no center in reach, run daily and on demand, plus a **drag-and-drop what-if** for a proposed center.
 - **The public learner finder** (no sign-in): search a place or use your current location, filter by qualification and area, and get the nearest assessment centers by travel time.
+- **Model features**: a six-month candidate forecast for existing areas, and a first-year estimate for a proposed assessment center.
 
 > **New here?** Follow [GETTING_STARTED.md](GETTING_STARTED.md): the whole project (backend and frontend) step by step.
+>
+> **Deploying or handing this over?** Read [docs/handover/BACKEND_HANDOVER.md](docs/handover/BACKEND_HANDOVER.md).
 
 ## Quick start (local)
 
@@ -18,10 +21,15 @@ cp .env.example .env              # set JWT_SECRET and SEED_DEMO_PASSWORD
 docker compose up -d db           # PostgreSQL 16 + PostGIS
 npm ci
 npm run db:setup                  # migrations + seed (geography, demo accounts) + TESDA API sync (centers, candidates) + data-quality recovery
+npm run forecast:seed             # 2026-10 forecast snapshot (no raw data or model artifact)
 npm run simulate                  # first simulation run (then daily at SIM_CRON)
 npm run demo:utilization -- --quarter=2026-Q4   # optional: demo slots + candidates for the capacity view
 npm run start:dev                 # http://localhost:3000/api/v1, docs at http://localhost:3000/docs
 ```
+
+`/forecasts` works after `forecast:seed`. `/new-centers` needs the optional internal Python service and the private
+T2MIS export; see [docs/new-centers/README.md](docs/new-centers/README.md) and
+[GETTING_STARTED.md](GETTING_STARTED.md#5-optional-new-center-model-service).
 
 Whole stack in containers, and what to check before putting it on a server: see [HOSTING.md](HOSTING.md).
 
