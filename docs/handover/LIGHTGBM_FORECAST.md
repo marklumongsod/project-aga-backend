@@ -266,7 +266,8 @@ The branch includes a committed 2026-10 snapshot for environments that do not ha
 
 ```bash
 npm run db:migrate
-npm run db:seed            # core geography/centers, only if the database is empty
+npm run db:seed            # geography + demo accounts, only if the database is empty
+npm run tesda:sync         # centers/qualifications/graduates (needs TESDA_API_KEY)
 npm run forecast:seed      # fresh forecast tables
 # or, when forecast data already exists:
 npm run forecast:seed -- --force

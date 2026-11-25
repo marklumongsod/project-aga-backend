@@ -2,7 +2,7 @@
 
 Project AGA (Assessment Center Gap Analysis) is for TESDA in the Philippines. It simulates whether each assessment center has the capacity to absorb the training graduates who need a National Certificate assessment. It flags candidates with no center within 90 minutes or 50 km, colors every region, province and city by assessment desert level and candidate density, and lets offices drop a proposed center on the map to see the effect.
 
-This repo is the **API only**. The frontend is a separate app; its spec is in `docs/FRONTEND_REQUIREMENTS.md`. Humans should start with `README.md`. This file is the working guide for Claude.
+This repo is the **API only**. The frontend is a separate app; its spec is in `docs/FRONTEND_REQUIREMENTS.md`. Humans should start with `README.md` or the full guide `docs/BACKEND_GUIDE.md`. This file is the working guide for Claude.
 
 ## Stack
 

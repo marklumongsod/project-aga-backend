@@ -12,12 +12,14 @@ It serves:
 
 > **New here?** Follow [GETTING_STARTED.md](GETTING_STARTED.md): the whole project (backend and frontend) step by step.
 >
+> **Full backend documentation:** [docs/BACKEND_GUIDE.md](docs/BACKEND_GUIDE.md) — architecture, every endpoint, database, deployment and operations.
+>
 > **Deploying or handing this over?** Read [docs/handover/BACKEND_HANDOVER.md](docs/handover/BACKEND_HANDOVER.md).
 
 ## Quick start (local)
 
 ```bash
-cp .env.example .env              # set JWT_SECRET and SEED_DEMO_PASSWORD
+cp .env.example .env              # set JWT_SECRET, SEED_DEMO_PASSWORD and TESDA_API_KEY
 docker compose up -d db           # PostgreSQL 16 + PostGIS
 npm ci
 npm run db:setup                  # migrations + seed (geography, demo accounts) + TESDA API sync (centers, candidates) + data-quality recovery

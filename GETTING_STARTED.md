@@ -43,6 +43,7 @@ nvm use
 # 1. settings
 cp .env.example .env
 #    then open .env and replace JWT_SECRET with a long random value, e.g. the output of:  openssl rand -hex 32
+#    also set TESDA_API_KEY (needed to pull centers and graduates) and SEED_DEMO_PASSWORD
 
 # 2. database (PostgreSQL + PostGIS in Docker; the first start downloads the image)
 docker compose up -d db

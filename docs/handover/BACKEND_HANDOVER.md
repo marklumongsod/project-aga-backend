@@ -2,6 +2,8 @@
 
 The two model features are merged on the `integration/models` branch. They share the same Postgres database and the same private raw-data folder.
 
+Full backend guide: [`docs/BACKEND_GUIDE.md`](../BACKEND_GUIDE.md).
+
 ## Branches
 
 | Branch | Feature | Endpoints |
@@ -118,7 +120,8 @@ If the database has no forecast data and you only need the current 2026-10 snaps
 
 ```bash
 npm run db:migrate
-npm run db:seed            # core geography/centers, only if the database is empty
+npm run db:seed            # geography + demo accounts, only if the database is empty
+npm run tesda:sync         # centers/qualifications/graduates (needs TESDA_API_KEY)
 npm run forecast:seed
 # replace an existing forecast snapshot:
 npm run forecast:seed -- --force

@@ -34,7 +34,8 @@ cp .env.example .env
 
 docker compose up -d db
 docker compose --profile web up -d --build api web        # website on port 8080, API reachable only through it
-docker compose exec api npm run db:seed:prod               # first time only: loads the data (see the demo-accounts note)
+docker compose exec api npm run db:seed:prod               # first time only: loads geography + demo accounts
+docker compose exec api npm run tesda:sync:prod            # centers, qualifications and upcoming graduates (needs TESDA_API_KEY)
 docker compose exec api npm run data:quality:prod -- --apply   # recovers the 38 centers a statistical check can save (see README, Data quality)
 docker compose exec api npm run simulate:prod              # first results; the dashboards are empty until this has run
 docker compose exec api npm run forecast:seed:prod         # serves /forecasts without the raw data or model artifact
