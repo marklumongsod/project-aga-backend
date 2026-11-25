@@ -21,14 +21,16 @@ npm run tesda:sync             # centers, qualifications, upcoming graduates (st
 npm run simulate               # first run; the dashboards return 404 until this runs
 npm run demo:utilization       # optional local demo: 20 slots/program/center/month + demo candidates (2026-Q4 by default)
 npm run forecast:import        # import forecast_out/forecasts_<month>.json (see docs/forecast/README.md)
+npm run forecast:seed          # load the committed 2026-10 forecast snapshot
 npm run forecast:map           # rebuild docs/forecast/forecast_places.csv from the raw data + backend geography
 npm run forecast:meta          # write forecast_out/forecast_meta_<month>.json from the model artifact
+npm run new-center:map         # rebuild docs/new-centers/*.csv from the raw data + backend geography
 # optional real travel times (OSRM): see README "Real travel times"; docker compose --profile routing up -d osrm; npm run travel:build
 npm run start:dev              # http://localhost:3000/api/v1 · Swagger at http://localhost:3000/docs
 
 npm run lint                   # tsc --noEmit (type check; there is no ESLint)
 npm test                       # unit tests: engine + rate bands
-npm run test:e2e               # 137 e2e tests against the seeded DB (runs in band)
+npm run test:e2e               # 146 e2e tests against the seeded DB (runs in band)
 npm run build                  # → dist/
 ```
 
@@ -63,6 +65,7 @@ src/
   dashboard/                 /dashboard/overview | map | centers
   centers/                   /centers/:id and /centers/:id/reach
   forecast/                  /forecasts and /forecasts/meta; monthly Team C ML output, scoped like the dashboard
+  new-centers/               /new-centers/meta and /new-centers/predict; internal New Center Model service
   simulation/
     engine/utilization-engine.ts   pure TS, no Nest or DB imports. Unit-tested. Keep it pure.
     travel/travel-time.model.ts    TravelTimeModel interface (from: TravelOrigin, to: TravelDest, km) + the estimate model (TRAVEL_TIME_MODEL token)
@@ -107,6 +110,7 @@ The DB check constraint `CHK_users_scope` ties role to scope columns: CO has nei
 - A center is **in reach** of a city when the **road and ferry travel time** to it is within the travel limit (90 minutes by default). There is **no straight-line distance cap**: distance never decides reach. `SIM_MAX_SPEED_KMH` (90; at Philippine speed limits the fastest average straight-line pace measured in the routed data is about 84) is used only to bound how far to look (`SimulationService.searchKm`, 135 km at 90 minutes) so nothing reachable is missed. The travel matrix (`npm run travel:build`) covers that radius, so rebuild it and re-run `npm run simulate` after changing the limit or the speed. A city with candidates and no center in reach is an assessment desert, and all its candidates are **flagged**. The regular reach run does not count slots; the separate utilization view does (see below).
 - The engine is deterministic with no randomness.
 - **Capacity utilization** (`?qualification=<key>&quarter=YYYY-Qn` on `/dashboard/overview|map|centers`): slots live in `center_qualification_slots`, one row per center × qualification × month. A quarter is the sum of its three months; the demo rule is **20 slots per program per center per month** (60 per quarter). The assignment is capacity-aware: for each qualification, candidates go to the nearest accredited center with an open slot within 90 minutes; overflow goes to the next center, and anyone left is **flagged**. `utilization = candidates wanting the center / quarter slots` (can exceed 100%); `assigned` is the capacity-limited part; `serviceRate = assigned / candidates`. The center endpoint `/centers/:id/utilization?quarter=` lists every qualification. The regular query without both parameters keeps the reach-only behavior. Candidates come from `upcoming_graduates` (BSRS is gone).
+- **New assessment center estimate** (`/new-centers/predict`, `/new-centers/meta`): a separate internal FastAPI service (`New_Center_Model/`) runs the Team C New Center Model (XGBoost count + LightGBM chance) for planned/new centers. NestJS validates the pin/role, maps PSGC/qualification keys to raw T2MIS IDs with `docs/new-centers/province_map.csv` and `qualification_map.csv`, calls the service, and stores `new_center_predictions`. The raw data stays private; the API never runs Python. Use it for a planned center or a center with no candidates yet; the monthly forecast takes over once a center has history. First-year error is about 120% with +28% bias, so compare sites, don't promise exact numbers. `npm run new-center:map` rebuilds the mappings.
 - **Adjustable travel limit**: `?limitMinutes=` (10-180, that is up to 3 hours, default `SIM_LIMIT_MINUTES` = 90) on `/dashboard/overview|map|centers`, `/centers/:id` (+`/reach`, `/isochrone`) and the what-if body. A non-default value runs a one-off simulation (`SimulationService.runFor`), stored as an `adhoc` run, reused for 30 minutes, never part of history, trend or `/simulation/runs`. The daily stored run always uses the default. The 50 km limit is not adjustable.
 - `flaggedShare` = flagged ÷ candidates. The frontend draws the legend from the API's `desertLegend` / `densityLegend` arrays, so change colors only in `DESERT_LEVELS` (`rate-band.ts`) and `common/density.ts`.
 - **Snapping**: a pin dropped or dragged by hand is moved onto the nearest drivable road by `GET /simulation/snap` (OSRM `nearest`, within 5 km, only if the road point stays inside the area and the office's scope; otherwise it stays put).

@@ -35,10 +35,23 @@ services:
       DATABASE_URL: postgresql://aga:aga@db:5432/aga?schema=public
       NODE_ENV: production
       OSRM_URL: http://osrm:5000 # used when TRAVEL_MODEL=osrm
+      NEW_CENTER_MODEL_URL: http://new-center-model:8010
       # The website's nginx is the only way in (see the `web` service), so trust its X-Forwarded-For for rate limits.
       TRUST_PROXY: "1"
     # localhost only: with TRUST_PROXY=1 the API must be reached through the `web` proxy, not directly
     ports: ["127.0.0.1:3000:3000"]
+
+  # Internal New Center Model service. Opt-in and needs the private raw data folder:
+  #   NEW_CENTER_DATA_PATH=/path/to/Data docker compose --profile new-center up -d --build new-center-model
+  new-center-model:
+    build: ./New_Center_Model
+    profiles: ["new-center"]
+    environment:
+      NEW_CENTER_DATA_DIR: /data
+      NEW_CENTER_LAST_MONTH: ${NEW_CENTER_LAST_MONTH:-2026-10}
+    volumes:
+      - ${NEW_CENTER_DATA_PATH:-./data/new-center}:/data:ro
+    ports: ["127.0.0.1:8010:8010"]
 
   # The website (nginx + the built frontend), served at http://localhost:8080 and forwarding /api to `api`.
   # Needs the sibling folder ../project-aga-frontend:  docker compose --profile web up -d --build

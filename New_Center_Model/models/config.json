@@ -1,0 +1,122 @@
+{
+ "description": "New assessment center model: expected candidates in each of the first 12 months after accreditation, and the chance of getting any.",
+ "trained_on": "1228 new centers accredited January 2023 - September 2025 (12 months each, up to August 2026)",
+ "count_model": {
+  "library": "xgboost",
+  "file": "new_center_count.json",
+  "rounds": 100,
+  "params": {
+   "objective": "reg:tweedie",
+   "tweedie_variance_power": 1.5,
+   "eta": 0.03,
+   "max_depth": 4,
+   "min_child_weight": 10,
+   "subsample": 0.8,
+   "colsample_bytree": 0.8,
+   "tree_method": "hist",
+   "nthread": 4,
+   "seed": 0,
+   "eval_metric": "tweedie-nloglik@1.5"
+  },
+  "features": [
+   "month_since_accreditation",
+   "target_month_of_year",
+   "region_id",
+   "province_id",
+   "latitude",
+   "longitude",
+   "center_type",
+   "center_class",
+   "n_quals",
+   "n_sectors",
+   "main_sector_id",
+   "avg_level",
+   "avg_duration_hours",
+   "learners_in_training_province",
+   "learners_finished_last_12_province",
+   "learners_started_last_3_province",
+   "learners_in_training_city",
+   "is_also_school",
+   "own_learners_in_training",
+   "own_learners_finished_last_12",
+   "competitor_centers",
+   "local_candidates_same_quals_avg",
+   "candidates_per_competitor",
+   "learners_per_center",
+   "province_candidates_avg",
+   "province_active_centers",
+   "typical_center_size_province"
+  ],
+  "categorical": [
+   "region_id",
+   "province_id",
+   "main_sector_id",
+   "center_type",
+   "center_class"
+  ],
+  "categorical_rule": "missing values left as NaN",
+  "rows": "one row per month 1-12; month_since_accreditation 1 = accreditation month",
+  "cap": "clip each monthly prediction to [0, 1368]"
+ },
+ "chance_model": {
+  "library": "lightgbm",
+  "file": "new_center_start.txt",
+  "features": [
+   "region_id",
+   "province_id",
+   "latitude",
+   "longitude",
+   "center_type",
+   "center_class",
+   "n_quals",
+   "n_sectors",
+   "main_sector_id",
+   "avg_level",
+   "avg_duration_hours",
+   "learners_in_training_province",
+   "learners_finished_last_12_province",
+   "learners_started_last_3_province",
+   "learners_in_training_city",
+   "is_also_school",
+   "own_learners_in_training",
+   "own_learners_finished_last_12",
+   "competitor_centers",
+   "local_candidates_same_quals_avg",
+   "candidates_per_competitor",
+   "learners_per_center",
+   "province_candidates_avg",
+   "province_active_centers",
+   "typical_center_size_province"
+  ],
+  "categorical": [
+   "region_id",
+   "province_id",
+   "main_sector_id",
+   "center_type",
+   "center_class"
+  ],
+  "output": "probability of at least one candidate in the first 12 months"
+ },
+ "outputs": {
+  "monthly": "expected candidates per month (sample level)",
+  "first_year": "sum of the 12 months",
+  "real_count": "divide by sample_rate"
+ },
+ "sample_rate": 0.2,
+ "test_accuracy": {
+  "first_year_wape": 119.5,
+  "bias_%": 27.5,
+  "wape_if_level_right": 106.9,
+  "province_totals_wape": 67.6,
+  "chance_rank_0_1": 0.56,
+  "test": "363 centers accredited January-September 2025"
+ },
+ "versions": {
+  "python": "3.13.7",
+  "lightgbm": "4.7.0",
+  "xgboost": "3.0.5",
+  "catboost": "1.2.10",
+  "pandas": "2.3.1",
+  "numpy": "2.3.2"
+ }
+}

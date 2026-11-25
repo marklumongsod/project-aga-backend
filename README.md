@@ -63,6 +63,8 @@ npm run lint        # type-check
 | POST/GET/DELETE | `/proposals`, `/proposals/:id` | office | Save a what-if as a proposal (the server works out the result), list the ones you may see, open or delete one |
 | GET | `/simulation/recommendations?level=&code=&limitMinutes=&count=` | office | Where to open a new center: up to 5 sites (default 3) in the area, best first. Each is a desert city with the pin moved onto the nearest road (OSRM), the candidates it serves, the deserts it closes, and the top 3 qualifications to offer (estimated from graduates per province and qualification) |
 | POST | `/simulation/what-if` | office | Drag and drop a proposed center `{lat, lon}`: before/after for the user's area, nationally, and for the region and province where the pin lands (as far as the role may see), including assessment deserts closed |
+| GET | `/new-centers/meta` | office | New Center Model cutoff, latest allowed accreditation month, model version and accuracy |
+| POST | `/new-centers/predict` | office | Estimate a planned center's first 12 months and chance of getting any candidates |
 | GET | `/public/places?q=` | public | Place search |
 | GET | `/public/qualifications?q=` | public | Qualification filter |
 | GET | `/public/centers/nearest?lat=&lon=` or `?cityKey=` `&qualification=&regionPsgc=&provincePsgc=` | public | Nearest centers, travel time, `desert` flag |
@@ -129,6 +131,7 @@ reads learner data.
 npm run forecast:map        # rebuild docs/forecast/forecast_places.csv (after a geography change)
 npm run forecast:meta -- --forecast forecast_out/forecasts_2026-10.json --out forecast_out/forecast_meta_2026-10.json
 npm run forecast:import -- --file=forecast_out/forecasts_2026-10.json --meta=forecast_out/forecast_meta_2026-10.json --replace
+npm run forecast:seed       # load the committed 2026-10 snapshot (no raw data or model artifact)
 ```
 
 - `GET /forecasts/meta` — latest run, model version, accuracy, `stale`.
@@ -138,6 +141,20 @@ npm run forecast:import -- --file=forecast_out/forecasts_2026-10.json --meta=for
 - No city-level forecast. Center forecasts are a guide; centers do not sum exactly to the province forecast.
 - See [docs/forecast/README.md](docs/forecast/README.md) for the data contract, mapping rules, schema, accuracy and
   operations.
+
+### New assessment center estimate (New Center Model)
+
+For a planned center, or a center accredited in the last 12 months with no candidates yet, the New Center Model
+estimates the first 12 months and the chance of any candidates. It is separate from the monthly forecast.
+
+- `GET /new-centers/meta` — raw-data cutoff, latest allowed accreditation month, model version, accuracy.
+- `POST /new-centers/predict` — body: `lat`, `lon`, `provincePsgc`, `qualificationKeys`, `accreditationMonth`,
+  optional `name`, `centerType`, `centerClass`.
+- The pin must be inside the selected province and the user's area; qualifications must be in the mapping.
+- The response: `chanceAnyCandidates`, `firstYearExpected`, 12 `monthly` rows, and a stored `id`.
+- The internal Python service holds the raw data and the model artifact; the API never runs Python.
+- Accuracy: first-year error about 120%, bias +28%. Use it to compare sites, not as an exact number.
+- See [docs/new-centers/README.md](docs/new-centers/README.md).
 
 ### Assessment deserts, hotspots and density (team doc)
 

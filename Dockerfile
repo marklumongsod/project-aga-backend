@@ -20,6 +20,8 @@ COPY database/seed-data ./database/seed-data
 COPY docs/forecast/forecast_places.csv ./docs/forecast/forecast_places.csv
 # Point-in-time forecast snapshot for npm run forecast:seed:prod.
 COPY seed/forecasts ./seed/forecasts
+# New Center Model backend <-> raw T2MIS mapping (names and IDs only).
+COPY docs/new-centers ./docs/new-centers
 USER aga
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:3000/api/v1/health >/dev/null || exit 1

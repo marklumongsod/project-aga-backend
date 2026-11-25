@@ -7,11 +7,15 @@ data/raw/
 data/osm/
 qa-travel-spotcheck.csv
 
-# macOS
+# macOS / editor
 .DS_Store
+.vscode/
 
-# Forecast model: raw learner data, the model artifact and generated output are owned by the data team.
-# The raw CSVs contain ULI identifiers; the model files are large and private.
-Forecast_Model/Data/
-Forecast_Model/models/
+# Monthly Team C model: private artifact and generated output (on the lightgbm branch full integration).
+Forecast_Model/
 forecast_out/
+
+# New Center Model: raw data (learner IDs) and Python cache. The model artifact itself is committed.
+New_Center_Model/Data/
+New_Center_Model/__pycache__/
+New_Center_Model/*.pyc

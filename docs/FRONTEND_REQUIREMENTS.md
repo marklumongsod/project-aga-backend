@@ -302,6 +302,21 @@ Entry points: the "Drag a new center onto the map" chip (with a location-pin ico
    - **Automatic road snap**: every pin dropped or dragged by hand is sent to `GET /simulation/snap?lat=&lon=&level=&code=`. If a drivable road is within 5 km and stays inside the area and the office's scope, the pin moves onto it and the note under the map says "Moved 30 m onto <road>."; otherwise it stays and the note says no road was found. Recommended places are already on a road and are not snapped again.
    - Copy under the title: "Nothing is saved until you save the proposal."
 
+### 7a. New center first-year estimate (optional)
+
+The what-if answers “how many candidates get a center in reach?”. The New Center Model answers “how busy will this
+planned center’s first year be?”. They are separate calls.
+
+- `GET /new-centers/meta` → `lastMonth`, `latestAccreditationMonth`, `modelVersion`, `testAccuracy`.
+- `POST /new-centers/predict` with `{ lat, lon, provincePsgc, qualificationKeys, accreditationMonth, name? }` →
+  `{ id, chanceAnyCandidates, firstYearExpected, monthly: [{ month, targetMonth, expected }], accuracy }`.
+- The pin must be inside the selected province and the office’s area. Qualification keys come from
+  `GET /dashboard/qualifications`; at least one is required.
+- Use `latestAccreditationMonth` as the maximum in the month picker. Later months return `400`.
+- `cityKey` is reserved; the current model uses province + pin. `school_ids`, center type/class are optional.
+- First-year error is about 120% with +28% bias. Show it as a guide for comparing sites, not an exact number.
+- The result is stored (`id`) for audit/comparison; the response has `modelVersion`.
+
 ## 7b. Proposals (`/proposals`)
 
 `GET /proposals` lists saved proposals, newest first: your own, plus those whose pin is in your region (RO) or province (PO); Certification Office sees all. Table columns: Proposal (name, city, travel limit), Area, Newly served, Deserts closed, Flagged (before → after), Saved by (You, or the author and office), Saved (date), Actions. Actions: **Open** (link to `/plan?level=..&code=..&pin=lat,lon`), **Export PDF** (fetches `GET /proposals/:id` and builds the same PDF as the planner), **Delete** (author or Certification Office only; asks "Delete / Keep" in place, no browser dialog). Empty state: "No proposals yet" with a button to the planner. `GET /proposals/:id` and `DELETE` answer `404` for a proposal you may not see.
@@ -467,6 +482,7 @@ Build these with a clear placeholder and don't fake the data.
 | --- | --- | --- |
 | TESDA SSO (T2MIS) | built; `501` until the server sets `T2MIS_SSO_ISSUER` | On `501` the button shows the "not connected yet" message |
 | Assessment candidate forecast | built (`/forecasts`, `/forecasts/meta`) | Show the six-month series with the accuracy caveat; no city-level forecast |
+| New center first-year estimate | built (`/new-centers/meta`, `/new-centers/predict`) | Show as a guide; first-year error ~120%, no city mapping yet |
 | Send to Regional Office | no endpoint | Toast "coming soon" |
 | Reports page | no endpoint | Placeholder page |
 | Qualification filter on dashboards and what-if | no per-qualification candidate counts | Disabled select + hint |
@@ -505,4 +521,5 @@ Built on top of §1-§14 and covered by the browser tests. Expected values in th
 11. **No selected-area chip.** Picking an area highlights its row in the table and on the map; nothing extra is shown in the map header.
 12. **Number formats** follow §12: flagged shares always have one decimal.
 13. **Capacity utilization added**: use the `qualification` + `quarter` filters and `utilizationLegend`. Utilization is candidates ÷ slots (can exceed 100%); `serviceRate` is assigned ÷ candidates. Slots are monthly (demo: 20 per program per center per month). The regular reach view remains unchanged.
+14. **New center first-year estimate added**: `GET /new-centers/meta` + `POST /new-centers/predict`. Use it for a planned center or a center with no candidates yet; it returns the chance of any candidates, the first-year total, and 12 monthly rows. It is separate from the what-if and the monthly forecast. Show the accuracy caveat (~120% first-year error, +28% bias) and use it to compare sites, not as an exact number. No city mapping yet; the pin + province are used.
 

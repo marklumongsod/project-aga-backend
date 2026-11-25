@@ -6,6 +6,7 @@ data/raw
 *.log
 data/osm
 
-# The forecast worker and its raw learner data are not part of the API image.
+# The model services and raw learner data are separate images, not part of the API image.
 Forecast_Model
 forecast_out
+New_Center_Model
